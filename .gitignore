@@ -1,0 +1,28 @@
+# Build output
+bin/
+obj/
+AppPackages/
+BundleArtifacts/
+*.msix
+*.msixbundle
+*.appx
+*.user
+*.suo
+.vs/
+TestResults/
+
+# Dictionary data: raw downloads and built databases are never committed
+# (they are large and carry their own licenses; see docs/DATA_SOURCES.md)
+data/raw/
+data/build/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+
+# Local signing material
+*.pfx
+*.cer
+
+# Benchmarks / scratch
+artifacts/

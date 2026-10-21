@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Lexi.AI/Lexi.AI.csproj" />
+    <Project Path="src/Lexi.Cli/Lexi.Cli.csproj" />
+    <Project Path="src/Lexi.Core/Lexi.Core.csproj" />
+    <Project Path="src/Lexi.Dictionary/Lexi.Dictionary.csproj" />
+    <Project Path="src/Lexi.Extension/Lexi.Extension.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Lexi.Tests/Lexi.Tests.csproj" />
+  </Folder>
+</Solution>

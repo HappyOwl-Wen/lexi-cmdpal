@@ -1,0 +1,11 @@
+{
+  "profiles": {
+    "Lexi.Extension (Package)": {
+      "commandName": "MsixPackage",
+      "doNotLaunchApp": true
+    },
+    "Lexi.Extension (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}
