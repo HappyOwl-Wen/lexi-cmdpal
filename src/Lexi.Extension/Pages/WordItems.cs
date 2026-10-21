@@ -85,8 +85,8 @@ internal static class WordItems
 
         if (w.Lang == Lang.En)
         {
-            items.Add(new CommandContextItem(new PronounceCommand(hub, w, "UK")));
-            items.Add(new CommandContextItem(new PronounceCommand(hub, w, "US")));
+            items.Add(new CommandContextItem(new PronounceCommand(hub, w, PronunciationPlan.British)));
+            items.Add(new CommandContextItem(new PronounceCommand(hub, w, PronunciationPlan.American)));
         }
 
         if (hub.AiEnabled)

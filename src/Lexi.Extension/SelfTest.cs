@@ -21,13 +21,13 @@ namespace Lexi.Extension;
 /// Drives the real provider, list page, details, entry page, fallback and settings form in-process — the calls
 /// Command Palette makes — against the installed dictionary and writes a PASS/FAIL report. Checks a release
 /// (trimmed) build without a host and helps troubleshooting. Uses a temporary settings folder, never touches the
-/// clipboard and plays no sound. --ai runs a Claude request; --network downloads a recording; --translation tests Google.
+/// clipboard and plays no sound. --ai runs a Claude request; --network downloads three recordings (British first, waiting out Wikimedia rate limits); --translation tests Google.
 /// </summary>
 internal static partial class SelfTest
 {
     private const string WarnPrefix = "WARN ";
     private static readonly TimeSpan WaitLimit = TimeSpan.FromSeconds(15);
-    private static readonly string[] EnglishWordCommands = ["复制释义", "发音", "复制单词", "发音（UK）", "发音（US）"];
+    private static readonly string[] EnglishWordCommands = ["复制释义", "发音（英式优先）", "复制单词", "英式发音", "美式发音"];
 
     public static int Run(string[] args)
     {
@@ -181,8 +181,8 @@ internal static partial class SelfTest
                     Expect(names.Contains(expected), $"missing context command \"{expected}\"");
                 }
 
-                var pronounce = commands.First(c => c.Command.Name == "发音").RequestedShortcut;
-                Expect(pronounce.Vkey == (int)VirtualKey.P && pronounce.Modifiers == VirtualKeyModifiers.Control, "Ctrl+P is not bound to 发音");
+                var pronounce = commands.First(c => c.Command.Name == "发音（英式优先）").RequestedShortcut;
+                Expect(pronounce.Vkey == (int)VirtualKey.P && pronounce.Modifiers == VirtualKeyModifiers.Control, "Ctrl+P is not bound to 发音（英式优先）");
                 return $"{body.Length:N0} chars; {names.Count} commands: {string.Join(", ", names)}";
             });
 
@@ -332,6 +332,8 @@ internal static partial class SelfTest
                     : detail;
             });
 
+            RunPronunciationChecks(r, hub, dataDirectory, withNetwork);
+
             if (withNetwork)
             {
                 r.Step("pronunciation: Commons recording", () =>
@@ -339,8 +341,15 @@ internal static partial class SelfTest
                     var word = hub.Dictionary.Lookup("Haus").Hits.First(h => h.Word.Lang == Lang.De).Word;
                     var view = hub.Dictionary.GetView(word) ?? throw new InvalidOperationException("no view for Haus");
                     var audio = view.Audio.Count > 0 ? view.Audio[0] : throw new InvalidOperationException("no recording referenced for Haus");
-                    using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+                    using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+                    WaitForCommons();
                     var path = hub.Pronouncer.EnsureCachedAsync(audio, cts.Token).GetAwaiter().GetResult();
+                    if (path is null && Pronouncer.CommonsPause > TimeSpan.Zero)
+                    {
+                        WaitForCommons();
+                        path = hub.Pronouncer.EnsureCachedAsync(audio, cts.Token).GetAwaiter().GetResult();
+                    }
+
                     Expect(path is not null && new FileInfo(path).Length > 1000, $"download failed ({hub.Pronouncer.LastDownloadError}): {Pronouncer.RecordingUrl(audio)}");
                     MediaSource.CreateFromUri(new Uri(path!)).Dispose();
                     return $"{audio.File} → {new FileInfo(path!).Length / 1024} KB (not played)";

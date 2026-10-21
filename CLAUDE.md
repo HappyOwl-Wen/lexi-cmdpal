@@ -10,7 +10,7 @@ Lexi 是 PowerToys Command Palette 的英/德 → 中词典扩展，也能中 �
 
 ```powershell
 & $dotnet build src\Lexi.Extension\Lexi.Extension.csproj -c Debug -p:Platform=x64   # 扩展 + 可注册的布局（bin\x64\Debug\...\win-x64）
-& $dotnet test tests\Lexi.Tests\Lexi.Tests.csproj                                    # 188 个测试，期望 0 失败；旧词典（无中文索引）跳过 19 个中文用例
+& $dotnet test tests\Lexi.Tests\Lexi.Tests.csproj                                    # 220 个测试，期望 0 失败；旧词典（无中文索引）跳过 19 个中文用例
 & $dotnet build src\Lexi.Cli\Lexi.Cli.csproj -c Release
 & $dotnet src\Lexi.Cli\bin\Release\net10.0\lexi.dll quality                          # 34/34（旧词典：15 通过，19 跳过）
 & $dotnet src\Lexi.Cli\bin\Release\net10.0\lexi.dll import --out artifacts\data\lexi.db   # 从这里构建新词典只能写到仓库里（见下方 AppData 重定向）
@@ -55,6 +55,13 @@ powershell -ExecutionPolicy Bypass -File scripts\import-data.ps1 [-NoEcdict] [-L
   - 通过上下文命令快捷键（如 Ctrl+I）打开的页面拿不到键盘焦点，Esc 无效。这是宿主的问题，从 Ctrl+K 菜单或回车打开则正常。
   - 设置窗口里的扩展列表是虚拟化的，要先用「搜索扩展」框过滤。不要在设置窗口里批量点击，那里的开关改的是用户自己的配置。
 - 同一个包反复注册（Debug 和 Release 交替）后，CmdPal 设置里会出现多个 Lexi 条目，需要「Reload」清理。
+- **重装扩展后，CmdPal 宿主进程还拿着旧扩展进程的对象**。Reload 不会重启宿主（2026-10-21 宿主从 16:32 起一直在跑，中间重装过两次）。
+  - 现象：新结果偶尔没有详情面板，Ctrl+K 只剩主命令，Ctrl+P 没反应。
+  - 宿主日志 `%LOCALAPPDATA%\Microsoft\PowerToys\CmdPal\Logs\0.100.2.0\Log_<日期>.log` 里有：
+    - `SafeSlowInit` … `EventSourceCache` / `IWeakReference.Resolve` 报 `0x800706BA`（RPC 服务器不可用）；
+    - 旧 fallback 的 `get_FallbackHandler` 也报同样的错。
+  - 是偶发的。界面验证失败时先看这个日志，不要急着改扩展代码：重跑，或者请用户完全退出再启动 CmdPal。
+  - 只装一次的普通用户不受影响。
 - **不要用 Windows PowerShell 5.1 的 `Get-Content`/`Set-Content` 改源码**：它默认按 GBK 读写，会把中文变成乱码（曾经损坏过 3 个文件）。改源码用 Edit/Write 工具，或者 Git Bash 的 `sed`（按字节处理，安全）。
 - `Lexi.Extension` 必须指定平台（`-p:Platform=x64`）。项目文件里已经把 AnyCPU 映射到 x64。
 - `CsWinRTWindowsMetadata` 指向 NuGet 里的 winmd。不设置的话，CsWinRT 会去注册表找 Windows SDK，然后报错。
@@ -69,6 +76,14 @@ powershell -ExecutionPolicy Bypass -File scripts\import-data.ps1 [-NoEcdict] [-L
 - PowerShell 5.1 里没有 `ProcessStartInfo.ArgumentList`，只能用 `.Arguments`。
 - 刚解压或刚构建的二进制第一次运行很慢（约 600 ms，Defender 扫描 / 首次加载）。性能要看第二次运行。
 - Wikimedia 偶尔对单个请求返回瞬时错误。`Pronouncer` 会重试一次，并把原因记录在 `LastDownloadError`。
+- **Wikimedia 对不带 `Accept` 头的请求返回 429**（「does not comply with our robot policy」）。HttpClient 默认不带这个头。
+  - 前端缓存里已有的文件照常返回 200，所以看起来像偶发故障。2026-10-21 自检里录音全部 429，用 curl 却能下载，对比请求头才发现。
+  - 另外，连续第三个未缓存的请求会收到 429，`Retry-After: 1`。
+  - `Pronouncer` 现在带 `Accept` 头，一次只下载一个文件，429 后按 `Retry-After` 暂停（`Pronouncer.CommonsPause`），不立即重试。
+  - 用 curl 排查时要选没缓存过的文件，否则看不出差别。
+- **Kaikki 的 `sounds` 不保证英式在前**：water 先列了十条美式和方言记音，RP 在第 11 条。导入只保留 6 条音标、4 条录音，必须先按口音排序再截取。
+  - 很多美式记音只有 `cot-caught-merger` 标签或 `without the cot–caught merger` 备注（注意是 en dash）。
+  - 英/美通用的记音同时带 `Received-Pronunciation` 和 `General-American`，记为 `UK/US`。
 - 用 PowerShell 捕获 `lexi` 的输出时，`→` 之类的字符会显示成乱码（因为按 GBK 解码）。直接在控制台运行时显示正常。
 
 ## 进度记录
@@ -110,7 +125,7 @@ powershell -ExecutionPolicy Bypass -File scripts\import-data.ps1 [-NoEcdict] [-L
 - 完整词条页的例句原来是列表项里嵌套的引用块，在 CmdPal 里不换行，相邻两条还会并成一段。现在改成列表项内硬换行加斜体，并过滤掉 Wiktionary 误归为例句的「Synonym: …」「Near-synonym: …」说明。CLI 渲染和单元测试已验证，界面效果要等用户重新安装后再看。
 - 界面实测又发现并修复了一个问题：AI 页完成后，回车仍然执行「取消请求」。现在命令随状态切换（加载中=取消，完成=复制，失败=重新生成），并修复了「重新生成」时被取消的旧请求覆盖新请求界面的竞态。这些改动需要用户再运行一次 install.ps1 才会生效。
 - 未在界面验证：
-  - 发音：用户要求先不播放声音。录音下载和语音合成已经由自检在不出声的情况下验证过；
+  - 发音：当时用户要求先不播放声音，自检在不出声的情况下验证了录音下载和语音合成。Phase 8 已在界面里出声验证；
   - 设置里 Lexi 详情页的表单和别名输入框：自检验证过表单能渲染和保存，界面上还没点进去看。
 
 ### Phase 2 — 真实词典数据 ✅
@@ -234,12 +249,45 @@ powershell -ExecutionPolicy Bypass -File scripts\import-data.ps1 [-NoEcdict] [-L
   - 英语句子：先「翻译这句话」，再「AI 翻译这句话」（截图 55）；Google 译成「今天天气真好」；AI 用了 4 秒（截图 56、57）；
   - 德语句子和独立的「Lexi 句子翻译」页里，这两项的顺序也一样（截图 58）。
 
+### Phase 8 — 发音：英式优先 ✅（2026-10-21 在 CmdPal 界面实测，出声）
+
+- 需求（用户 2026-10-21）：「可以加入发音功能了，优先英式发音」。之前的「先不播放声音」不再适用。
+- 做了什么：
+  - `PronunciationPlan`（`Lexi.Dictionary/View`）决定顺序：
+    - 英语：英式录音（含英/美通用）→ en-GB 语音 → 其他口音录音 → en-US（或任一 en-*）语音；
+    - 显式「英式发音」「美式发音」只用该口音；
+    - 德语：DE → AT → CH 录音，然后是德语语音。
+  - `Pronouncer` 按顺序执行。提示里写明口音、录音还是合成，以及退而求其次的原因；没装英式语音时附上添加方法。
+    - 命令名称：`发音（英式优先）`（Ctrl+P）、`英式发音`、`美式发音`。详情面板底部写「Ctrl+P：发音（英式优先）」。
+  - 导入：`KaikkiImporter.EnglishRegion` 依次看标签、备注、文件名，识别出 `UK/US`，`cot–caught` 归为美式。先按口音排序再截取（见「踩过的坑」）。
+  - 词条视图：音标和录音英式在前；详情表头为「英 … · 美 …」，英/美通用时只显示一条；地区标签加上 加/新西兰/爱尔兰/苏格兰/印度。
+  - 下载遵守 Wikimedia 机器人策略：带 `Accept` 头，一次下载一个文件，429 时按 `Retry-After` 暂停。
+- 验证：
+  - 单元测试 220 个全部通过。新增 32 个：口音识别 22 例、发音顺序 7 例、音标排序和表头 2 例，以及导入夹具里的 water（按原文顺序 RP 排在第 11 条）；
+  - `lexi quality` 34/34；新词典上 water 的表头是「英 /ˈwɔː.tə/ · 美 /ˈwɔ.tɚ/」（原来没有英式），house 是「英/美 /haʊ̯s/」；
+  - 自检 Debug 和裁剪后的 Release 包加 `-Network` 都是 64/64（不加 `-Network` 时少下载录音那一步）。不出声的完整 Ctrl+P 流程：
+    - house →「🔊 英式真人录音（Wikimedia Commons：En-uk-house.ogg）」；
+    - weakness →「🔊 美式真人录音（…；没有英式录音，也未安装英式语音（…添加「英语(英国)」））」；
+    - weakness 的「英式发音」→「没有英式发音：…」。
+  - 本机只有 en-US、de-DE、zh-CN 语音，没有 en-GB，所以没有英式录音的词会退到美式录音。
+- 新词典：`artifacts\data\lexi.db`（20:14 重新导入，用时 11.1 分钟，口音排序后截取，词条数不变）。用户当前装的那一版（14:56）保存为 `lexi-prev.db`。
+- 界面实测（`artifacts\cmdpal-verify\verify8.ps1`，9/9，截图 60–66）。用户第二次运行 `install.ps1 -SkipBuild -Database <绝对路径>` 并 Reload 后：已安装的 DLL 与 20:15 的包哈希一致，词典是 20:14 的新库。结果：
+  - house：表头只有「英/美 /haʊ̯s/」，底部「Ctrl+P：发音（英式优先）」；Ctrl+P 播放并提示「🔊 英式真人录音（Wikimedia Commons：En-uk-house.ogg）」（截图 60、61）；
+  - weakness：表头「英 /ˈwiːk.nɪs/ · 美 /ˈwik.nɪs/」；Ctrl+P 提示「🔊 美式真人录音（…；没有英式录音，也未安装英式语音（…添加「英语(英国)」））」，两行显示完整（截图 62）；
+  - Ctrl+K 菜单依次是 查看完整词条、复制释义、发音（英式优先）Ctrl+P、复制单词、英式发音、美式发音、AI 三项、Wiktionary（截图 63）；
+  - 选「英式发音」后显示黄色警告「没有英式发音：…」（截图 64）；
+  - water：表头「英 /ˈwɔː.tə/ · 美 /ˈwɔ.tɚ/」，Ctrl+P 播放 En-uk-water.ogg（截图 65）；Haus：「🔊 真人录音（…De-Haus.ogg）」（截图 66）；
+  - 包的 LocalState\audio-cache 里有 4 个缓存的录音。
+- 第一次让用户安装时，界面里什么都没变（DLL 哈希不同、词典还是 14:56 的、最后一次注册在 15:48、扩展进程从 16:33 一直在跑）。原因是脚本没有真正运行。用户在开始菜单打开的 PowerShell 里重新运行后才装上。以后验证前先比对哈希。
+- 装上后前两次运行有失败，都不是发音的问题：
+  - 第一次：扩展刚重启约 30 秒，进不了 Lexi 页面；
+  - 第二次：weakness 那一行没有详情，Ctrl+K 只有主命令（宿主的问题，见「踩过的坑」）。
+  - 第三次全部通过。
+
 ## 待办
 
-1. 用户方便时再验证两项：
-   - 发音（Ctrl+P，会出声）；
-   - 设置里 Lexi 详情页的表单和别名（Alias `dict`，Indirect）。
+1. 用户方便时再验证：设置里 Lexi 详情页的表单和别名（Alias `dict`，Indirect）。
 2. Ctrl+I 打开的页面里 Esc 无效是宿主问题。可以考虑向 PowerToys 报告，扩展这边不需要改。
 3. （可选）签名发布：`package.ps1 -Sign` 会生成自签名证书。在其他电脑上信任证书需要管理员权限，执行前先征得用户同意。
 4. （可选）FreeDict deu-eng 作为用户本机可选的补充来源（GPL/AGPL，不要合并进可分发的数据库）。
-5. `master` 还停在首次提交 4a76679；中文反查和双向翻译（Phase 6–7）只提交到了 `feature/lexi-dictionary`，要不要合并到 `master` 由用户决定。以后的改动也是用户要求时再提交，提交信息末尾加 `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`。
+5. 以后的改动在用户要求时再提交，提交信息末尾加 `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`。`master` 在 a2ecf75（中文反查和双向翻译）；`feature/lexi-dictionary` 比它多一个提交（英式优先发音，Phase 8），还没合并到 `master`。仓库没有配置远端，没有推送过。

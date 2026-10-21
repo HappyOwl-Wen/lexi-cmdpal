@@ -105,6 +105,22 @@
 - Wiktionary 的 `sounds` 字段给出 Commons 文件名（如 `De-Schwachstelle.ogg`）以及 MP3 转码地址。
 - 播放时才从 `upload.wikimedia.org` 下载 MP3，缓存在扩展的 LocalState 目录，之后离线可用。界面显示文件名，可追溯授权。
 - 没有录音或离线时，回退到 Windows 语音合成（界面标明"系统合成语音"）；两者都不可用时明确提示"无可用发音"。
+- 英语按口音分组，**英式优先**，顺序见 ARCHITECTURE §7。口音来自 `sounds` 里的这些信息（2026-10 英文版数据中最常见的取值）：
+
+  | 口音 | 标签（tags） | 备注（note） | 文件名前缀 |
+  |---|---|---|---|
+  | 英式 UK | `UK`、`Received-Pronunciation`、`British`、`RP`、`England`、`Southern-England`、`London` | `SSB`、`Great Britain`、`London` 等 | `En-uk-`、`En-gb-` |
+  | 美式 US | `US`、`General-American`、`American`，以及美国地名（`California`、`New-York-City` …）、`cot-caught-merger` | 含 `US` 一词（`of the US`）、`General American`、美国州名，以及 `cot–caught merger` | `En-us-`、`En-nyc-` |
+  | 英/美 UK/US | 同时有英式和美式标签（house 的 `/haʊ̯s/`） | | |
+  | 澳/加/新西兰/爱尔兰/苏格兰/印度 | `Australia`、`Canada`、`New-Zealand`、`Ireland`、`Scotland`、`India` | `Queensland` 等 | `En-au-`、`En-ca-` … |
+
+  - 标签优先于备注，备注优先于文件名。`cot–caught merger` 只在没有其他地区标记时算美式。
+  - 英国的地方方言（Lancashire、Northumbria、Estuary English …）不算英式标准音，留作「未标注」，排在英式和美式之后。
+  - 导入时每个词条先按口音排序，再截取 6 条音标和 4 条录音。原文的顺序并不总是英式在前（water 先列了十条美式和方言记音），先截取会把 RP 丢掉。
+- 下载遵守 Wikimedia 的 [Robot policy](https://wikitech.wikimedia.org/wiki/Robot_policy)：
+  - 请求带 `User-Agent` 和 `Accept` 头；
+  - 同一时刻只下载一个文件；
+  - 收到 429 时按 `Retry-After` 暂停，不立即重试。
 
 ## 6. 署名与追溯机制
 

@@ -202,7 +202,8 @@ download（RawFiles）→ ECDICT → enwiktionary 英语 → dewiktionary 德语
 `WordViewBuilder` 把一个词在各来源的条目聚合成 `WordView`：
 
 - 来源优先级：英语 wikt-en 高于 ECDICT；德语 wikt-de 高于 wikt-zh 高于 wikt-en；
-- 音标只取优先级最高的那个来源；
+- 音标只取优先级最高的那个来源，再按口音排序（`PronunciationPlan.AccentRank`）：英语依次是英式（含英/美通用）、美式、未标注、其他地区，德语依次是德国（含未标注）、奥地利、瑞士；同一口音里音位记音 `/…/` 在语音记音 `[…]` 前。录音按同样的顺序排列；
+- 详情面板的表头最多两条音标：英式一条、美式一条。第一条是英/美通用（house `/haʊ̯s/`）时只显示这一条；
 - 中文、英文、德文释义按块分开，每块注明来源；
 - 中文块分三种，依次显示：直接释义（ECDICT、中文版 Wiktionary）、按义项的对应词（翻译表，编号与英文/德文义项一致）、「中文词条的译词表收录此词」（反向词条）。中文反查找到的词，在这三种块里都能看到它对应的中文是从哪来的。
 
@@ -243,20 +244,39 @@ download（RawFiles）→ ECDICT → enwiktionary 英语 → dewiktionary 德语
   - 错误信息经过清理后才显示，日志里不出现任何凭据。
 - `AiPage` 在页面打开时才发请求，每 100 ms 刷新一次正文；页面顶部固定标注「AI 生成内容」，正文不会写回词典。
 
-**发音**（`Pronouncer`）：
+**发音**：顺序由 `PronunciationPlan`（`Lexi.Dictionary`，纯逻辑，有单元测试）决定，`Pronouncer`（扩展）负责执行。
 
-- 依次尝试该词的 Commons 录音，用 MD5 路径规则拼出转码后的 MP3 地址。下载 8 秒超时，遇到 429/5xx 或连接错误重试一次，成功后缓存到 LocalState；
-- 都失败时用 `SpeechSynthesizer` 合成，按 en-GB/en-US/de-DE/de-AT/de-CH 选择语音；
-- 最后才提示「无可用发音」。提示里说明播放的是真人录音还是合成语音，以及原因（例如「词典中没有录音」「录音下载失败：HTTP 429」）。
+- 英语默认**英式优先**：
+  1. 英式录音（标为英/美通用的录音也算）；
+  2. en-GB 系统语音；
+  3. 其他口音的录音（美式、未标注、其他地区）；
+  4. en-US 语音，没有时用任何一种 en-* 语音。
+  - 第 3、4 步标记为「其他口音」，提示里会说明原因：没有英式录音、英式录音下载失败，或没装英式语音（附添加方法）。
+- `Ctrl+K` 里的「英式发音」「美式发音」只用该口音的录音和语音，没有就明确说「没有英式发音」，不改用另一种口音。
+- 德语：德国（含未标注）、奥地利、瑞士的录音，然后是 de-DE 语音，没有时用任何一种 de-* 语音。
+- 录音：用 MD5 路径规则拼出 Commons 转码后的 MP3 地址，下载超时 8 秒，成功后缓存到 LocalState。5xx 或连接错误重试一次。
+- Wikimedia 的机器人策略（[Robot policy](https://wikitech.wikimedia.org/wiki/Robot_policy)）：
+  - 请求必须带 `Accept` 头。HttpClient 默认不带，Wikimedia 前端会对没缓存的文件回 429「does not comply with our robot policy」；
+  - 同一进程同一时刻只下载一个文件；
+  - 收到 429 不立即重试，而是按 `Retry-After`（1 秒到 10 分钟，缺省 30 秒）暂停所有 Commons 请求，期间直接跳到下一步，提示「Wikimedia 限流，N 秒后再试」。
+- 所有步骤都失败时提示「无可用发音」。提示里写明口音（英式/美式/英/美/澳式…）、真人录音还是合成语音，以及退而求其次的原因。
+- `Pronouncer` 可以接收一个输出回调：自检用它代替扬声器，走完整个 Ctrl+P 流程但不出声。
+
+**口音标注**（导入时，`KaikkiImporter.EnglishRegion`）：
+
+- 依次看 wiktextract 的标签、录音者的备注（Lingua Libre 常把出身写在 note 里），最后看 Commons 文件名前缀（`En-uk-`、`en-us-`、`En-au-` …）。
+- 同时有英式和美式标记（`Received-Pronunciation` + `General-American`）时记为 `UK/US`。
+- `cot–caught merger` 这类只在美式发音里做的区分，在没有其他地区标记时记为美式。
+- 每个词条最多保留 6 条音标和 4 条录音。先按口音排序再截取，所以排在后面的英式记音不会被大量地区变体挤掉（water 的 RP 记音排在原文第 11 条）。
 
 ## 8. 测试与验证
 
 | 层次 | 工具 | 内容 |
 |---|---|---|
-| 单元测试 | `tests/Lexi.Tests` | 规范化、编辑距离、反向转写、模糊索引（与暴力算法对比）、搜索引擎（内存存储）、词形描述、词条编解码、导入清洗规则、Claude Code 参数与流事件解析、提示词、缺少 CLI 时的错误处理 |
+| 单元测试 | `tests/Lexi.Tests` | 规范化、编辑距离、反向转写、模糊索引（与暴力算法对比）、搜索引擎（内存存储）、词形描述、词条编解码、导入清洗规则、口音识别（标签/备注/文件名）、发音顺序（英式优先、显式口音、德语）、音标排序与表头、Claude Code 参数与流事件解析、提示词、缺少 CLI 时的错误处理 |
 | 导入集成测试 | `ImportPipelineTests` | 用样例原始文件跑完整导入，再验证查询和渲染 |
 | 真实数据测试 | `RealDictionaryTests` | 34 个验收用例（15 个英语/德语 + 19 个中文反查，中文用例按所属语言的组内名次计）；德语名词（冠词/复数/IPA）、德语动词（主要形式）、英语（英式 IPA/中文）的抽查；典型查询延迟；没有数据库或没有中文索引时跳过并给出原因 |
-| 扩展自检 | `Lexi.Extension.exe --self-test`（`scripts/self-test.ps1`） | 进程内驱动真实的 provider、页面、详情、词条页、fallback、设置表单（渲染并保存）、筛选、AI 入口、TTS；可选测试录音下载（`-Network`）和 Claude Code（`-Ai`）。`-Package` 测试裁剪后的 Release 包 |
+| 扩展自检 | `Lexi.Extension.exe --self-test`（`scripts/self-test.ps1`） | 进程内驱动真实的 provider、页面、详情、词条页、fallback、设置表单（渲染并保存）、筛选、AI 入口、TTS、发音顺序与 Ctrl+P 提示（不出声）；可选测试录音下载和英式优先的完整流程（`-Network`）和 Claude Code（`-Ai`）。`-Package` 测试裁剪后的 Release 包 |
 | 性能 | `lexi bench` | 冷启动、预热后各类查询的分位数、详情构建、内存，生成 `docs/BENCHMARKS.md` |
 | 质量 | `lexi quality` | 验收用例的排名与耗时 |
 

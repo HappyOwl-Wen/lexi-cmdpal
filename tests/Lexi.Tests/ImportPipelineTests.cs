@@ -98,6 +98,18 @@ public sealed class ImportPipelineTests : IClassFixture<ImportPipelineTests.Fixt
     }
 
     [Fact]
+    public void British_pronunciations_are_kept_ahead_of_regional_variants()
+    {
+        // As in the real entry, water lists American and dialect forms before Received Pronunciation; the import keeps
+        // only a few transcriptions and recordings, and the British ones must be among them.
+        var view = WordViewBuilder.Build(_f.Db, _f.Db.GetWordsByFold("water", Lang.En).Single());
+        Assert.Equal(("/ˈwɔː.tə/", "UK"), (view.Ipa[0].Text, view.Ipa[0].Region));
+        Assert.Contains(view.Ipa, p => p.Text == "/ˈwɑ.tɚ/" && p.Region == "US");
+        Assert.Equal(["En-uk-water.ogg", "LL-Q1860 (eng)-Back ache-water.wav", "LL-Q1860 (eng)-Nail123Real-water.wav", "En-us-water.ogg"], view.Audio.Select(a => a.File));
+        Assert.Contains("英 `/ˈwɔː.tə/` · 美 `/ˈwɔ.tɚ/`", MarkdownRenderer.Details(view, null, includeTitle: false), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void English_senses_carry_their_mandarin_translations()
     {
         var word = _f.Db.GetWordsByFold("authentication", Lang.En).Single();
@@ -172,13 +184,14 @@ public sealed class ImportPipelineTests : IClassFixture<ImportPipelineTests.Fixt
                 children,'tʃildrәn,,"pl. 孩子, 孩子们",,,,,0,0,0:child/1:s,,
                 ge,dʒi:,,n. 通用电气公司,,,,,0,0,i:ging,,
                 """);
-            Write(raw, "freq/en_full.txt", "go 50000\nwent 30000\nchild 20000\nchildren 25000\nauthentication 300\nging 5\nge 100\n");
+            Write(raw, "freq/en_full.txt", "go 50000\nwent 30000\nwater 40000\nchild 20000\nchildren 25000\nauthentication 300\nging 5\nge 100\n");
             Write(raw, "freq/de_full.txt", "haus 50000\nhäuser 8000\ngehen 40000\nging 30000\ngehst 2000\nschwachstelle 300\nschwachstellen 200\nbedrohung 400\nübertragung 900\n");
 
             WriteGz(raw, "kaikki/kaikki.org-dictionary-English.jsonl.gz",
                 """{"word": "authentication", "pos": "noun", "lang": "English", "lang_code": "en", "sounds": [{"ipa": "/ɔːˌθɛntɪˈkeɪʃn̩/", "tags": ["Received-Pronunciation"]}], "senses": [{"glosses": ["Proof of identity required by a user to log on."], "topics": ["computing", "engineering"], "translations": [{"lang": "Chinese Mandarin", "code": "cmn", "lang_code": "cmn", "sense": "proof of identity", "roman": "rènzhèng", "word": "認證 /认证"}, {"lang": "Chinese", "code": "zh", "lang_code": "zh", "tags": ["Hokkien"], "sense": "proof of identity", "word": "驗證"}, {"lang": "German", "code": "de", "lang_code": "de", "word": "Authentifizierung"}]}], "forms": [{"form": "authentications", "tags": ["plural"]}]}""",
                 """{"word": "went", "pos": "verb", "lang": "English", "lang_code": "en", "senses": [{"glosses": ["simple past of go"], "tags": ["form-of", "past"], "form_of": [{"word": "go"}]}]}""",
-                """{"word": "go", "pos": "verb", "lang": "English", "lang_code": "en", "senses": [{"glosses": ["To move from one place to another."]}], "translations": [{"lang": "Chinese Mandarin", "code": "cmn", "lang_code": "cmn", "sense": "to move from one place to another", "roman": "qù", "word": "去"}], "forms": [{"form": "goes", "tags": ["present", "singular", "third-person"]}, {"form": "went", "tags": ["past"]}, {"form": "gone", "tags": ["participle", "past"]}]}""");
+                """{"word": "go", "pos": "verb", "lang": "English", "lang_code": "en", "senses": [{"glosses": ["To move from one place to another."]}], "translations": [{"lang": "Chinese Mandarin", "code": "cmn", "lang_code": "cmn", "sense": "to move from one place to another", "roman": "qù", "word": "去"}], "forms": [{"form": "goes", "tags": ["present", "singular", "third-person"]}, {"form": "went", "tags": ["past"]}, {"form": "gone", "tags": ["participle", "past"]}]}""",
+                """{"word": "water", "pos": "noun", "lang": "English", "lang_code": "en", "sounds": [{"note": "without the cot–caught merger", "ipa": "/ˈwɔ.tɚ/"}, {"note": "without the cot–caught merger", "ipa": "[ˈwɔ.ɾɚ]"}, {"audio": "LL-Q1860 (eng)-Nail123Real-water.wav", "tags": ["US"], "note": "non-cot-caught"}, {"tags": ["cot-caught-merger"], "ipa": "/ˈwɑ.tɚ/"}, {"tags": ["cot-caught-merger"], "ipa": "[ˈwɑ.ɾɚ]"}, {"audio": "En-us-water.ogg", "tags": ["US"], "note": "cot-caught"}, {"note": "Baltimore, Philadelphia", "ipa": "/ˈwʊ.tɚ/"}, {"audio": "LL-Q1860 (eng)-Byrhtnoð-water.wav", "note": "Baltimore", "tags": ["Philadelphia"]}, {"tags": ["Northumbria"], "ipa": "/wa.tɐ/"}, {"tags": ["Estuary-English"], "ipa": "[ˈwoː.ʔɐ]"}, {"tags": ["Received-Pronunciation"], "ipa": "/ˈwɔː.tə/"}, {"tags": ["Received-Pronunciation"], "ipa": "[wo̞ː.tʰə]"}, {"audio": "En-uk-water.ogg", "tags": ["Received-Pronunciation"]}, {"audio": "LL-Q1860 (eng)-Back ache-water.wav", "tags": ["UK"]}], "senses": [{"glosses": ["A clear liquid that forms rain, rivers and seas."]}]}""");
 
             WriteGz(raw, "kaikki/kaikki.org-dictionary-German.jsonl.gz",
                 """{"word": "Schwachstelle", "pos": "noun", "lang": "German", "lang_code": "de", "senses": [{"glosses": ["weakness, weak point"], "tags": ["feminine"]}, {"glosses": ["vulnerability"], "tags": ["feminine"]}], "forms": [{"form": "Schwachstellen", "tags": ["plural"]}]}""",

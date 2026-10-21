@@ -34,7 +34,8 @@ public static class MarkdownRenderer
             sb.AppendLine().AppendLine("*暂无可靠的直接中文释义（不做 德→英→中 拼接）。可按 Ctrl+I 让 AI 解释（结果会标注为 AI 生成）。*");
         }
 
-        sb.AppendLine().AppendLine("*Enter：完整词条 · Ctrl+P：发音 · Ctrl+I：AI 解释 · Ctrl+K：更多*");
+        var pronounce = v.Word.Lang == Lang.En ? "发音（英式优先）" : "发音";
+        sb.AppendLine().AppendLine($"*Enter：完整词条 · Ctrl+P：{pronounce} · Ctrl+I：AI 解释 · Ctrl+K：更多*");
         return sb.ToString();
     }
 
@@ -139,7 +140,7 @@ public static class MarkdownRenderer
     private static void AppendHeaderLine(StringBuilder sb, WordView v, bool compact)
     {
         var parts = new List<string>();
-        foreach (var p in v.Ipa.Take(compact ? 2 : 4))
+        foreach (var p in compact ? HeaderIpa(v) : v.Ipa.Take(4))
         {
             var region = RegionLabel(p.Region);
             parts.Add(region is null ? $"`{p.Text}`" : $"{region} `{p.Text}`");
@@ -188,6 +189,33 @@ public static class MarkdownRenderer
         if (v.Ipa.Count > 0)
         {
             sb.AppendLine().Append("*音标来源：").Append(Escape(v.Ipa[0].Source.Name)).AppendLine("*");
+        }
+    }
+
+    /// <summary>
+    /// Details pane, two transcriptions at most. English: the British one and the first American one; only one when it
+    /// is given for both (house 英/美 /haʊ̯s/, not followed by a second British notation such as /haws/).
+    /// </summary>
+    private static IEnumerable<PronView> HeaderIpa(WordView v)
+    {
+        var first = v.Ipa.FirstOrDefault();
+        if (first is null)
+        {
+            yield break;
+        }
+
+        yield return first;
+        if (v.Word.Lang == Lang.En && first.Region == PronunciationPlan.BritishAndAmerican)
+        {
+            yield break;
+        }
+
+        var second = v.Word.Lang == Lang.En && first.Region == PronunciationPlan.British
+            ? v.Ipa.FirstOrDefault(p => PronunciationPlan.IsAccent(p.Region, PronunciationPlan.American)) ?? v.Ipa.ElementAtOrDefault(1)
+            : v.Ipa.ElementAtOrDefault(1);
+        if (second is not null)
+        {
+            yield return second;
         }
     }
 
@@ -354,7 +382,13 @@ public static class MarkdownRenderer
     {
         "UK" => "英",
         "US" => "美",
+        "UK/US" => "英/美",
         "AU" => "澳",
+        "CA" => "加",
+        "NZ" => "新西兰",
+        "IE" => "爱尔兰",
+        "SC" => "苏格兰",
+        "IN" => "印度",
         "AT" => "奥",
         "CH" => "瑞",
         _ => null,

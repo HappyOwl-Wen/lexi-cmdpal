@@ -4,6 +4,7 @@ using System.Text.Json;
 using Lexi.Core.Models;
 using Lexi.Core.Search;
 using Lexi.Core.Text;
+using Lexi.Dictionary.View;
 
 namespace Lexi.Dictionary.Import;
 
@@ -907,44 +908,79 @@ internal static class KaikkiImporter
         foreach (var s in Arr(root, "sounds"))
         {
             var tags = StrArr(s, "tags");
-            var region = englishRegions ? EnglishRegion(tags) : GermanRegion(tags, StrArr(s, "raw_tags"));
-            var text = Str(s, "ipa");
-            if (!string.IsNullOrWhiteSpace(text) && ipa.Count < 6 && !ipa.Any(p => p.Text == text && p.Region == region))
+            var region = englishRegions ? EnglishRegion(tags, Str(s, "note"), Str(s, "audio")) : GermanRegion(tags, StrArr(s, "raw_tags"));
+            var text = Str(s, "ipa")?.Trim();
+            if (!string.IsNullOrEmpty(text) && !ipa.Any(p => p.Text == text && p.Region == region))
             {
                 var note = string.Join(", ", StrArr(s, "raw_tags").Take(1));
-                ipa.Add(new Pron { Text = text.Trim(), Region = region, Note = note.Length > 0 ? TextCleanup.Truncate(note, 60) : null });
+                ipa.Add(new Pron { Text = text, Region = region, Note = note.Length > 0 ? TextCleanup.Truncate(note, 60) : null });
             }
 
-            var file = Str(s, "audio");
-            if (!string.IsNullOrWhiteSpace(file) && audio.Count < 4)
+            var file = Str(s, "audio")?.Trim();
+            if (!string.IsNullOrEmpty(file) && !audio.Any(a => a.File == file))
             {
-                audio.Add(new AudioRef { File = file.Trim(), Region = region, Mp3Url = Str(s, "mp3_url") });
+                audio.Add(new AudioRef { File = file, Region = region, Mp3Url = Str(s, "mp3_url") });
             }
         }
 
+        // Keep a few, chosen by accent (English British first, German Germany first), so that a long list of regional
+        // variants cannot crowd out the standard ones (water lists ten American and dialect forms before RP).
+        // Phonemic /…/ before phonetic […] within an accent.
+        var lang = englishRegions ? Lang.En : Lang.De;
         if (ipa.Count > 0)
         {
-            // Phonemic /…/ before phonetic […], keeping region grouping stable.
-            entry.Ipa = ipa.OrderBy(p => p.Text.StartsWith('/') ? 0 : 1).ToList();
+            entry.Ipa = ipa.OrderBy(p => PronunciationPlan.AccentRank(lang, p.Region)).ThenBy(p => p.Text.StartsWith('/') ? 0 : 1).Take(6).ToList();
         }
 
         if (audio.Count > 0)
         {
-            entry.Audio = audio;
+            entry.Audio = audio.OrderBy(a => PronunciationPlan.AccentRank(lang, a.Region)).Take(4).ToList();
         }
     }
 
-    private static string? EnglishRegion(List<string> tags)
+    // Accent markers as wiktextract tags them, and as Lingua Libre speakers note their origin when there is no tag
+    // (the most frequent values in the 2026-10 English dump; US regional accents count as American).
+    private static readonly HashSet<string> BritishTags = new(StringComparer.Ordinal)
     {
-        foreach (var t in tags)
+        "UK", "Received-Pronunciation", "British", "RP", "England", "Southern-England", "London",
+    };
+
+    private static readonly HashSet<string> AmericanTags = new(StringComparer.Ordinal)
+    {
+        "US", "General-American", "American", "California", "Northern-California", "Texas", "New-Jersey",
+        "Midwestern-US", "New-England", "New-York-City", "New-York", "Southern-US", "Northern-US", "Pennsylvania",
+        "Philadelphia", "Boston", "Virginia", "Southern-American-English", "Inland-Northern-American", "Eastern-New-England",
+    };
+
+    private static readonly HashSet<string> BritishNotes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "SSB", "SSB!SSB", "Great Britain", "London", "Londres", "Multicultural British English", "Gloucestershire",
+        "Hampshire", "Berkshire",
+    };
+
+    private static readonly HashSet<string> AmericanNotes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "North Carolina", "Connecticut", "Wisconsin", "Colorado", "Pacific Northwest", "Maryland", "Midland US", "Austin",
+        "Chicago", "Inland North", "Baltimore", "Rhode Island", "California Vowel Shift", "Midwest US",
+    };
+
+    private static readonly HashSet<string> AustralianNotes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Queensland", "Brisbane", "AuE", "AU!Australia",
+    };
+
+    /// <summary>
+    /// UK, US, AU … for an English pronunciation; "UK/US" when one transcription is given for both Received
+    /// Pronunciation and General American (house /haʊs/). Tags first, then the speaker's note, then the Commons file
+    /// name ("En-uk-house.ogg", "en-us-…"); null when nothing says.
+    /// </summary>
+    internal static string? EnglishRegion(List<string> tags, string? note = null, string? file = null)
+    {
+        var british = tags.Any(BritishTags.Contains) || (note is not null && BritishNotes.Contains(note));
+        var american = tags.Any(AmericanTags.Contains) || (note is not null && IsAmericanNote(note));
+        if (british || american)
         {
-            switch (t)
-            {
-                case "UK" or "Received-Pronunciation" or "British" or "RP" or "England" or "Southern-England":
-                    return "UK";
-                case "US" or "General-American" or "American":
-                    return "US";
-            }
+            return british && american ? "UK/US" : british ? "UK" : "US";
         }
 
         foreach (var t in tags)
@@ -952,16 +988,41 @@ internal static class KaikkiImporter
             switch (t)
             {
                 case "Australia": return "AU";
-                case "Canada": return "CA";
+                case "Canada" or "Ontario" or "British-Columbia" or "Quebec": return "CA";
                 case "New-Zealand": return "NZ";
                 case "Ireland": return "IE";
                 case "Scotland": return "SC";
-                case "India": return "IN";
+                case "India" or "Indian-English": return "IN";
             }
         }
 
-        return null;
+        if (note is not null && AustralianNotes.Contains(note))
+        {
+            return "AU";
+        }
+
+        // Wiktionary draws the cot–caught distinction under General American (water: "cot–caught merger" /ˈwɑ.tɚ/,
+        // "without the cot–caught merger" /ˈwɔ.tɚ/); used only when no region is named.
+        if (tags.Contains("cot-caught-merger") || (note?.Contains("cot–caught merger", StringComparison.Ordinal) ?? false))
+        {
+            return "US";
+        }
+
+        var name = file?.ToLowerInvariant() ?? string.Empty;
+        return name.StartsWith("en-uk-", StringComparison.Ordinal) || name.StartsWith("en-gb-", StringComparison.Ordinal) ? "UK"
+            : name.StartsWith("en-us-", StringComparison.Ordinal) || name.StartsWith("en-nyc-", StringComparison.Ordinal) ? "US"
+            : name.StartsWith("en-au-", StringComparison.Ordinal) ? "AU"
+            : name.StartsWith("en-ca-", StringComparison.Ordinal) ? "CA"
+            : name.StartsWith("en-nz-", StringComparison.Ordinal) ? "NZ"
+            : name.StartsWith("en-in-", StringComparison.Ordinal) ? "IN"
+            : null;
     }
+
+    /// <summary>A listed place, or a note that names the US ("of the US", "Upper Midwestern US, Canada") or General American.</summary>
+    private static bool IsAmericanNote(string note) =>
+        AmericanNotes.Contains(note)
+        || note.Contains("General American", StringComparison.Ordinal)
+        || note.Split([' ', ',', ';', '(', ')'], StringSplitOptions.RemoveEmptyEntries).Contains("US");
 
     private static string? GermanRegion(List<string> tags, List<string> rawTags)
     {

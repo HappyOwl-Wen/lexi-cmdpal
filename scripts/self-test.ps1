@@ -9,7 +9,7 @@
 .PARAMETER Ai
   Also run one real Claude Code request (uses your Claude Code quota).
 .PARAMETER Network
-  Also download one pronunciation recording from Wikimedia Commons (not played).
+  Also download pronunciation recordings from Wikimedia Commons (house, weakness, Haus; not played) and check the British-first messages.
 .PARAMETER Translation
   Also translate two sample sentences through Google (no Claude or API key).
 #>

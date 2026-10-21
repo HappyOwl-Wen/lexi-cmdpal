@@ -18,9 +18,9 @@ Lexi 是 PowerToys **Command Palette**（CmdPal）的原生扩展，用来查英
 | 词形还原 | `Häuser → Haus`、`ging → gehen`、`went → go`、`Schwachstellen → Schwachstelle` |
 | 德语变音 | `Uebertragung → Übertragung`、`hauser → Häuser → Haus`、`ß/ss` 等价 |
 | 中文反查 | 输入中文，分「英语 / 德语」两组列出对应词：`房子 → house / das Haus`、`防火墙 → firewall / Firewall`；繁体自动转简体；没有整词对应时（`网络安全漏洞`）列出其中最长的已知词语 |
-| 详情面板 | 选中即显示：音标（英/美）、冠词与复数、动词主要形式、中文/英文/德文释义、来源 |
+| 详情面板 | 选中即显示：音标（英式在前、美式在后；两种口音相同时只显示一条「英/美」）、冠词与复数、动词主要形式、中文/英文/德文释义、来源 |
 | 完整词条 | Enter 打开：全部义项、例句、变格/变位表、词形、近义/易混词、学习者信息、来源与许可 |
-| 发音 | 优先使用真人录音（Wikimedia Commons，首次播放时下载并缓存）；没有录音时用 Windows 语音合成；两者都没有时明确提示「无可用发音」，三种情况在提示里区分清楚 |
+| 发音 | 英语**英式优先**：英式真人录音 → 英式系统语音 → 美式录音 → 美式语音；德语先用德国录音，再用奥地利/瑞士录音和德语语音。录音来自 Wikimedia Commons，首次播放时下载并缓存。提示里写明播放的是哪种口音、真人录音还是合成语音，退而求其次时说明原因（如「没有英式录音」）。`Ctrl+K` 里的「英式发音」「美式发音」只播放该口音 |
 | AI（可选） | 解释词义、德语语法、易混词辨析、专业语境、句子翻译、中文译成英语和德语。走本机 Claude Code CLI，可取消、可重新生成，结果缓存 30 天 |
 | 在线翻译（可选） | 单独开关，默认关闭；用 Google 翻译把英语/德语句子译成中文、把中文译成英语和德语，按 Enter 才联网，无需 Claude 或 API Key。与 AI 翻译并列，两种可以都开 |
 | 主页快查 | 在 CmdPal 主页输入 `dict vulnerability`，底部直接显示一行释义 |
@@ -32,7 +32,7 @@ Lexi 是 PowerToys **Command Palette**（CmdPal）的原生扩展，用来查英
 - PowerToys 0.100 或更新，并启用 Command Palette（开发和测试用的是 0.100.2）
 - 构建需要 [.NET 10 SDK](https://dotnet.microsoft.com/)，可以装在用户目录。**不需要** Visual Studio，也不需要 Windows SDK
 - 在本机注册未签名的扩展包，需要 Windows **开发者模式**
-- 可选：[Claude Code](https://claude.com/claude-code) CLI（AI 功能）；英语/德语语音包（语音合成）
+- 可选：[Claude Code](https://claude.com/claude-code) CLI（AI 功能）；英语/德语语音包（语音合成）。没有英式录音的词想听英式发音，需要添加「英语(英国)」语音（设置 → 时间和语言 → 语音 → 添加语音）
 
 ## 快速开始
 
@@ -150,11 +150,11 @@ powershell -ExecutionPolicy Bypass -File scripts\self-test.ps1 -Package
 |---|---|
 | `Enter` | 打开完整词条 |
 | `Ctrl+Enter` | 复制释义 |
-| `Ctrl+P` | 发音（英语另有 UK / US 两项，在 `Ctrl+K` 菜单里） |
+| `Ctrl+P` | 发音（英语英式优先；只听某一种口音用 `Ctrl+K` 菜单里的「英式发音」「美式发音」） |
 | `Ctrl+Shift+C` | 复制单词 |
 | `Ctrl+I` | AI 解释词义与用法 |
 | `Ctrl+G` | AI 讲解德语语法（德语词条） |
-| `Ctrl+K` | 全部命令：UK/US 发音、AI 易混词辨析、AI 专业语境、在 Wiktionary 中打开 |
+| `Ctrl+K` | 全部命令：英式/美式发音、AI 易混词辨析、AI 专业语境、在 Wiktionary 中打开 |
 | `→` | 接受拼写纠错 / 变音建议 |
 | 筛选下拉框 | 全部语言 / English / Deutsch |
 | `Esc` / `Alt+←` | 返回（从 Ctrl+I 打开的 AI 页面只能用 `Alt+←`，见已知限制） |
@@ -271,6 +271,8 @@ powershell -ExecutionPolicy Bypass -File scripts\uninstall.ps1 -RemoveData # 同
 | 想确认扩展本身是否正常 | `scripts\self-test.ps1 -Installed`（检查已安装的文件），加 `-Network` 测录音下载，加 `-Ai` 测 Claude Code |
 | AI 提示找不到 Claude Code | 在 Lexi 设置里填写 `claude.exe` 的完整路径，并确认它在终端里能直接运行（已登录） |
 | 发音提示「无可用发音」 | 设置 → 时间和语言 → 语音 → 添加英语/德语语音；有录音的词联网后会播放真人录音 |
+| 英语词播放的是美式录音或美式语音 | 这个词没有英式录音，系统里也没有英式语音（提示里会写明）。添加「英语(英国)」语音后，这类词会用英式合成语音；有英式真人录音的词照常优先播放录音 |
+| 提示「Wikimedia 限流，N 秒后再试」 | Wikimedia 暂时拒绝了下载。扩展按它要求的时间暂停下载，期间改用合成语音；过一会儿再按 `Ctrl+P` 即可，下载过的录音已缓存，不再联网 |
 | 重新导入时数据库被占用 | `import-data.ps1` 会先结束扩展进程；导入完成后重新打开 Lexi 即可 |
 | 输入中文时提示「当前词典数据库还不支持中文反查」 | 词典是旧版构建的，没有中文索引。再运行一次 `scripts\import-data.ps1`（复用已下载的原始数据，约 10 分钟） |
 

@@ -1,4 +1,5 @@
 using Lexi.Core.Search;
+using Lexi.Dictionary.View;
 using Lexi.Extension.Pages;
 using Lexi.Extension.Services;
 using Microsoft.CommandPalette.Extensions;
@@ -6,7 +7,10 @@ using Microsoft.CommandPalette.Extensions.Toolkit;
 
 namespace Lexi.Extension.Commands;
 
-/// <summary>Plays the pronunciation in the background and reports what was played (recording / TTS / none).</summary>
+/// <summary>
+/// Plays the pronunciation in the background and reports what was played (recording / TTS / none). Without an
+/// accent English is British first; "UK" / "US" play only that accent.
+/// </summary>
 internal sealed partial class PronounceCommand : InvokableCommand
 {
     private readonly ServiceHub _hub;
@@ -18,7 +22,12 @@ internal sealed partial class PronounceCommand : InvokableCommand
         _hub = hub;
         _word = word;
         _region = region;
-        Name = region is null ? "发音" : $"发音（{region}）";
+        Name = region switch
+        {
+            PronunciationPlan.British => "英式发音",
+            PronunciationPlan.American => "美式发音",
+            _ => word.Lang == Core.Models.Lang.En ? "发音（英式优先）" : "发音",
+        };
         Icon = Glyphs.Speaker;
     }
 

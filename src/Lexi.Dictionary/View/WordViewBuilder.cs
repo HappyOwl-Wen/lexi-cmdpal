@@ -147,11 +147,16 @@ public static class WordViewBuilder
             }
         }
 
-        // IPA: keep the preferred source's transcriptions; only fall back to others when it has none.
+        // IPA: keep the preferred source's transcriptions; only fall back to others when it has none. British first for
+        // English (Germany first for German), phonemic /…/ before phonetic […] within an accent.
         if (ipa.Count > 0)
         {
             var bestSource = ipa[0].Source.Id;
-            ipa = ipa.Where(p => p.Source.Id == bestSource).Take(4).ToList();
+            ipa = ipa.Where(p => p.Source.Id == bestSource)
+                .OrderBy(p => PronunciationPlan.AccentRank(lang, p.Region))
+                .ThenBy(p => p.Text.StartsWith('/') ? 0 : 1)
+                .Take(4)
+                .ToList();
         }
 
         var (grammar, grammarSource, cases, summary, gender) = BuildGrammar(lang, ordered);
@@ -166,7 +171,7 @@ public static class WordViewBuilder
             Article = article,
             PartsOfSpeech = pos,
             Ipa = ipa,
-            Audio = audio.OrderBy(a => RegionRank(a.Region)).ToList(),
+            Audio = audio.OrderBy(a => PronunciationPlan.AccentRank(lang, a.Region)).ToList(),
             Grammar = grammar,
             GrammarSource = grammarSource,
             Cases = cases,
@@ -307,13 +312,5 @@ public static class WordViewBuilder
         (Lang.De, "wikt-zh") => 1,
         (Lang.De, "wikt-en") => 2,
         _ => 5,
-    };
-
-    private static int RegionRank(string? region) => region switch
-    {
-        "UK" => 0,
-        "US" => 1,
-        null => 2,
-        _ => 3,
     };
 }
