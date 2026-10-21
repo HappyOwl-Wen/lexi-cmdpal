@@ -38,7 +38,7 @@ public static class Program
         else
         {
             Console.WriteLine("Lexi is a PowerToys Command Palette extension. It is started by Command Palette, not directly.");
-            Console.WriteLine("Diagnostics: Lexi.Extension.exe --self-test [report-file] [--ai] [--network]");
+            Console.WriteLine("Diagnostics: Lexi.Extension.exe --self-test [report-file] [--ai] [--network] [--translation]");
         }
 
         return 0;

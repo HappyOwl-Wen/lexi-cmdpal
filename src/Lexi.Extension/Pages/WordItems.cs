@@ -169,6 +169,9 @@ internal static class WordItems
             MatchKind.Form or MatchKind.FormFold or MatchKind.FormTranslit =>
                 $"{hit.Matched} → {FormDescriber.Describe(hit.FormTags, w.Lang)} · {badge}{brief}",
             MatchKind.Fuzzy or MatchKind.FuzzyForm => $"你要找的是不是 {w.Word}？ · {badge}{brief}",
+            MatchKind.ChinesePart => $"部分匹配「{hit.Matched}」 · {badge}{brief}",
+            // The one-line summary may come from a source that does not use the matched term (loophole: 枪眼 …).
+            MatchKind.Chinese when hit.Matched is { } term && !brief.Contains(term, StringComparison.Ordinal) => $"「{term}」 · {badge}{brief}",
             _ => badge + brief,
         };
     }
@@ -189,6 +192,7 @@ internal static class WordItems
             MatchKind.Form or MatchKind.FormFold or MatchKind.FormTranslit => "词形",
             MatchKind.Translit => "ae→ä",
             MatchKind.Fold => "无变音",
+            MatchKind.ChinesePart => "部分匹配",
             _ => null,
         };
         if (label is not null)

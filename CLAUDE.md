@@ -1,6 +1,6 @@
 # CLAUDE.md — Lexi 开发指南
 
-Lexi 是 PowerToys Command Palette 的英/德 → 中词典扩展（C# / .NET 10，官方 CmdPal SDK）。用户文档见 [README.md](README.md)，架构见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)，数据源与许可见 [docs/DATA_SOURCES.md](docs/DATA_SOURCES.md)。
+Lexi 是 PowerToys Command Palette 的英/德 → 中词典扩展，也能中 → 英/德反查（C# / .NET 10，官方 CmdPal SDK）。用户文档见 [README.md](README.md)，架构见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)，数据源与许可见 [docs/DATA_SOURCES.md](docs/DATA_SOURCES.md)。
 
 ## 环境与命令
 
@@ -10,15 +10,17 @@ Lexi 是 PowerToys Command Palette 的英/德 → 中词典扩展（C# / .NET 10
 
 ```powershell
 & $dotnet build src\Lexi.Extension\Lexi.Extension.csproj -c Debug -p:Platform=x64   # 扩展 + 可注册的布局（bin\x64\Debug\...\win-x64）
-& $dotnet test tests\Lexi.Tests\Lexi.Tests.csproj                                    # 123 个测试，期望 0 失败 0 跳过（有数据库时）
+& $dotnet test tests\Lexi.Tests\Lexi.Tests.csproj                                    # 188 个测试，期望 0 失败；旧词典（无中文索引）跳过 19 个中文用例
 & $dotnet build src\Lexi.Cli\Lexi.Cli.csproj -c Release
-& $dotnet src\Lexi.Cli\bin\Release\net10.0\lexi.dll quality                          # 15/15
+& $dotnet src\Lexi.Cli\bin\Release\net10.0\lexi.dll quality                          # 34/34（旧词典：15 通过，19 跳过）
+& $dotnet src\Lexi.Cli\bin\Release\net10.0\lexi.dll import --out artifacts\data\lexi.db   # 从这里构建新词典只能写到仓库里（见下方 AppData 重定向）
+& $dotnet src\Lexi.Cli\bin\Release\net10.0\lexi.dll zh-index --from <旧库> --out <新库>  # 只重建中文反查索引，约 30 秒
 & $dotnet src\Lexi.Cli\bin\Release\net10.0\lexi.dll query <词> | show <词> [--full] | stats
 & $dotnet src\Lexi.Cli\bin\Release\net10.0\lexi.dll bench --rounds 5 --sample 300 --out docs/BENCHMARKS.md
 & $dotnet src\Lexi.Cli\bin\Release\net10.0\lexi.dll ai <词> [--kind grammar] --prompt  # 只打印提示词，不调用 Claude
 powershell -ExecutionPolicy Bypass -File scripts\self-test.ps1 [-Package|-Installed] [-Network] [-Ai]
 powershell -ExecutionPolicy Bypass -File scripts\package.ps1                          # Release MSIX → artifacts\msix
-powershell -ExecutionPolicy Bypass -File scripts\install.ps1                          # 需要开发者模式
+powershell -ExecutionPolicy Bypass -File scripts\install.ps1 [-SkipBuild] [-Database artifacts\data\lexi.db]   # 需要开发者模式；-Database 同时装新词典
 powershell -ExecutionPolicy Bypass -File scripts\deploy-dev.ps1                       # 注册 Debug 布局，需要开发者模式
 powershell -ExecutionPolicy Bypass -File scripts\import-data.ps1 [-NoEcdict] [-Limit N]
 ```
@@ -27,6 +29,10 @@ powershell -ExecutionPolicy Bypass -File scripts\import-data.ps1 [-NoEcdict] [-L
 
 - 不修改 PowerToys 源码；不注册或占用 `Alt+Space` 或任何全局热键（别名和热键由用户在 CmdPal 设置里自己配）。
 - 不提交、不打包词典数据（`.gitignore` 已排除 `*.db`、`data/raw`）。ECDICT 标记为不可再分发。不用网页抓取绕过许可。
+  - **例外（用户 2026-10-21 明确决定）**：在线翻译（`Lexi.Translation.GoogleTranslator`）使用 Google 的非官方免 Key 接口 `translate_a/single?client=gtx`，目的是在 AI 之外再提供一种联网翻译。
+    - 它默认关闭，只在按回车时请求，有限速，只缓存在内存里；设置和界面都写明是非官方接口。
+    - 不要把它当作违规报告，也不要移除。
+    - 如果以后要分发扩展，改用官方 API（Google Cloud Translation、DeepL、Azure Translator 等，Key 存在 Windows 凭据管理器）。
 - AI 只能由用户触发，结果必须标注为 AI 生成，不能覆盖词典内容。不保存、不记录任何凭据或 Key。AI 使用本机 Claude Code CLI（用户明确要求，替代原需求中的 OpenAI 兼容配置）。
 - 不得为了让测试通过而硬编码测试输入。验收用例只能用来检验结果（`AcceptanceCases.cs`），搜索代码里不能有特判。
 - 没跑过的测试不能说通过。占位实现不能当成完成。部署受阻时如实说明。
@@ -40,7 +46,9 @@ powershell -ExecutionPolicy Bypass -File scripts\import-data.ps1 [-NoEcdict] [-L
   - 仓库目录（`C:\workspace\…`）不受影响：Debug 布局可以从这里注册，`artifacts\` 里的产物也是真实文件。
   - 在容器外起进程（如 WMI）会被自动模式拦截。需要写真实 AppData 的步骤（`install.ps1`、`import-data.ps1`）只能请用户在普通终端运行。
   - 扩展支持从 `程序目录\Data\lexi.db` 读取词典，Debug 布局验证时可以把词典复制到那里。
+  - 新词典在这里只能构建到仓库里（`lexi import --out artifacts\data\lexi.db`），再请用户在普通终端运行 `install.ps1 -SkipBuild -Database artifacts\data\lexi.db` 装到 `%LOCALAPPDATA%`。测试、自检要用新库时设置 `$env:LEXI_DB`（`self-test.ps1` 会继承）。
 - **CmdPal 失去焦点会自动收起**：窗口是用 DWM cloak 隐身的（`IsWindowVisible` 仍为 true），隐身后 UIA 读不到任何内容。用户正在操作其他窗口时，后台进程也抢不到前台。做 UI 自动化验证前，要请用户暂时别动电脑。
+  - `verify7.ps1` 开头用 `GetLastInputInfo` 等鼠标键盘空闲 8 秒再开始（最多等 2 分钟）。第一次运行时用户还在用 Chrome，窗口一弹出就被收起，12 步全部因为找不到窗口而失败；加了这段等待后一次通过。
 - CmdPal 的搜索框 AutomationId 是 `MainSearchBox`。`x-cmdpal://settings` 打开设置，其他 `x-cmdpal://…` 地址会唤出主窗口。验证脚本在 `artifacts\cmdpal-verify\`（`uia.ps1`、`verify*.ps1`，不提交）。
   - **含中文的 .ps1 必须带 UTF-8 BOM**，否则 PowerShell 5.1 会按 GBK 解析，直接报语法错误。
   - **在根页面按 `Alt+←` 会收起窗口**（NavigateBack 发现没有上一页时会触发 Dismiss）。回主页要用 `Alt+Home`。
@@ -53,6 +61,8 @@ powershell -ExecutionPolicy Bypass -File scripts\import-data.ps1 [-NoEcdict] [-L
 - 缺少 `Microsoft.Windows.SDK.BuildTools` 会报 APPX3217 `UAP.props`。资源清单默认语言要显式写成 `<DefaultLanguage>en-US</DefaultLanguage>`，否则会取构建机的 UI 语言。
 - 资源文件（`Assets\*.png`）要设置 `CopyToOutputDirectory`，构建输出目录才能直接当作布局注册。
 - **工具包的 `CommandItem.Title` 为空时会回退到 `Command.Name`**。想隐藏 fallback，必须同时把 `Command` 换回无名的 `NoOpCommand`。
+- **列表分组标题要用没有命令的列表项**（工具包的 `Separator(title)`）。宿主 0.100.2 不显示普通项的 `ListItem.Section`（`ListItemViewModel.EvaluateType`），所以首页的「最近查询 / 提示」一直没有标题，直到 2026-10-21 在界面里查中文反查时才发现。现在由 `DictionaryPage.WithSectionHeaders` 在分组变化处插入 `Separator`。
+- 刚 Reload 之后（扩展进程刚重启的十几秒内），在主页对 Lexi 按 Enter 可能没有反应，或者页面过几秒才出来。UI 自动化要先确认真的进入了 Lexi 页面，再开始检查：搜索框的 Name 就是占位文字，最多等 4 秒，不行就回主页重试（`verify5.ps1` 的 `Open-LexiChecked`）。
 - 宿主同步调用 fallback 的 `UpdateQuery`（专用线程，慢阈值 200 ms），这里只能做低成本工作。主页每次按键都会创建一个 `DictionaryPage`，页面要等第一次 `GetItems()` 才搜索。
 - `DictionaryPage.SearchText` 的 getter 带副作用：顶层页面超过 1 秒没有输入时，读取会重置回首页（用来实现「每次打开都从首页开始」）。测试或驱动代码不要随便读它。
 - 从 Claude Code 会话里启动子进程 `claude` 时，会继承 `CLAUDECODE`、`CLAUDE_CODE_SIMPLE` 等环境变量，进入 bare 模式后 OAuth 失效。`UserEnvironment.Apply` 会从注册表重建环境变量并移除这些变量。
@@ -150,14 +160,86 @@ powershell -ExecutionPolicy Bypass -File scripts\import-data.ps1 [-NoEcdict] [-L
   - `self-test.ps1`。
 - 文档：README、ARCHITECTURE、DATA_SOURCES、BENCHMARKS、THIRD-PARTY-NOTICES，以及本文件。
 
+### Phase 6 — 中文反查（中 → 英/德）✅（2026-10-21 在 CmdPal 界面实测，含分组标题）
+
+- 需求：输入中文，显示对应的英语和德语词。
+- 数据（都来自已在用的 ECDICT 和 Wiktionary 文件，许可不变，见 `docs/DATA_SOURCES.md` §2.1）：
+  - ECDICT 中文释义；
+  - 英文版 Wiktionary 英语词条按义项的汉语译词（新导入到 `Sense.Zh`，词条页显示为「按义项的对应词」）；
+  - 德文版 Wiktionary 翻译表；中文版 Wiktionary 的德语释义；
+  - 中文版 Wiktionary 中文词条的英/德翻译表。导入时挂到已有词头上，成为 `Kind = "reverse"` 的词条，共 44,010 条对应、27,324 个词头。
+- 索引：`zh_index(term, word_id, weight)`，导入最后一步生成（`ZhIndexBuilder`）。完整库有 758,613 个中文词语、1,381,180 条对应关系，生成约 30 秒；整个导入 9.9 分钟。
+  - 权重 = 释义中的行/位置，乘以来源系数（`[网络]` 0.55，名字音译 0.3，翻译表 0.95，反向 0.9，`…的` 词干 0.95）；每多一个来源给出同一对应 +6。
+  - 带占位符的条目（`吃...的人`）跳过。
+- 搜索（`SearchChinese`）：
+  - 繁体转简体；整词查找；查不到时找最长的已知子串（`ChinesePart`）；
+  - 英、德分组，各占一半名额；
+  - 排序：权重 + Zipf×5；单个字母 −30，缩写 −6；
+  - 屈折形式的重复项（threats/threat）在原形分数不低于它减 5 时隐藏。
+- 界面：
+  - `DictionaryPage.Chinese.cs`：「英语 English」「德语 Deutsch」两组；
+  - 可选的 AI 项（新任务 `TranslateChinese`）：词语放在最后，句子或部分匹配时放在最前；
+  - 旧词典没有中文索引时提示更新；
+  - fallback 支持 `dict 房子` →「房子 → house · das Haus」（不加前缀时只对 ≥2 字的词语）；
+  - 详情和词条页注明「中文反查：「X」→ word」。
+- 验证：
+  - 单元测试与导入测试：186 个全部通过（用新库）；
+  - `lexi quality`：新库 34/34（新增 19 个中文用例，按所属语言组内名次计）；旧库 15 通过、19 跳过；
+  - 自检：Debug 59/59，裁剪后的 Release 包 59/59（`LEXI_DB` 指向新库）；旧库 37 通过、20 个警告（中文用例跳过，并验证了更新提示）；
+  - `lexi ai 威胁` 真实调用一次，6.9 秒，英/德分节；
+  - 中文查询 0.5–9 ms，fallback 3–6 ms。
+- 排序上的已知不足：同样合格的译法里，冷僻但释义只有这一个词的词，可能排在常用词前面。例如 `弱点` 的 weakness 排第 3，`威胁` 的 threat 排第 4，都在验收阈值内。ECDICT 的个别错误数据（doobie = 数据库）会照常出现。
+- 新词典在 `artifacts\data\lexi.db`（529 MB，不提交）。
+- 界面实测（用户用绝对路径运行 `install.ps1 -SkipBuild -Database …` 并 Reload 之后；`artifacts\cmdpal-verify\verify5.ps1`，截图 40–45）：
+  - 防火墙 → firewall 排第一，德语有 der/die Firewall，副标题带「「防火墙」 ·」（ECDICT 摘要里是错字「放火墙」）；
+  - 電腦 → computer；
+  - 网络安全漏洞：AI 项在最前，cybersecurity 和其他结果带「部分匹配」；句子 `我想学习德语。`：AI 项在最前；
+  - Deutsch 筛选下只剩 der Apfel；
+  - 词条页标题下方显示「中文反查：「房子」→ house」，三种中文块都在；
+  - 主页 `dict 房子`、不加前缀的 `苹果` 都在「回退」组里出现。
+- 界面实测发现的问题：结果有正确的先后顺序，但没有「英语 / 德语」分组标题，原因见「踩过的坑」。已修复，Debug 和 Release 包的自检都通过了（59/59，标题为 英语 English / 德语 Deutsch / AI 翻译）。
+- 用户再装一次（15:22 的包）后复查：
+  - 首页标题「最近查询 / 提示」出现；
+  - `房子` 依次是「英语 English」house、bure、dhar，「德语 Deutsch」das Haus、hauseigen，「AI 翻译」；
+  - 句子是「AI 翻译」在最前；
+  - 截图 40、43、47、48。
+- 列表是虚拟化的，第一屏以外的行不在 UIA 树里。英语结果多时（電腦、学习，各 10 条），德语组在第一屏以下，要往下翻（`verify6.ps1` 用 ↓ 键翻页后确认了 der Computer、lernen）。
+- 按用户决定，词典页每种语言最多 6 条（AI 项在最前时 4 条，按语言筛选时 12 条），让德语组出现在第一屏。界面里一屏约 8 行：标题约 40 px，结果行 66 px。`lexi quality` 和测试直接调用搜索引擎（Limit 20），不受影响。
+- 用户装上 15:32 的包后，在界面里确认（`verify5.ps1` 12/12，不翻页）：
+  - 電腦：6 条英语之后，「德语 Deutsch」和 der Computer 在第一屏（截图 48）；
+  - 句子：「AI 翻译」、4 条英语之后，「德语 Deutsch」和 lernen 在第一屏（截图 43）。
+- 第一次让用户安装时，脚本按当前目录解析 `artifacts\data\lexi.db`；用户不在仓库目录运行，脚本在第一步就停了，什么都没装。`-Database` 现在也会到仓库根目录下找。
+
+### Phase 7 — 翻译：AI 和联网两种方式，两个方向都有 ✅（2026-10-21 在 CmdPal 界面实测）
+
+- 需求（用户 2026-10-21）：既能用 AI 翻译，也能联网翻译。英/德句子恢复 Claude 的翻译项，中文输入加 Google 翻译成英语和德语的项。使用 Google 非官方接口是用户的决定，见「规矩」里的例外。
+- 做了什么：
+  - `GoogleTranslator.TranslateAsync` 增加目标语言参数（只允许 `zh-CN`、`en`、`de`），缓存键带上目标语言；`WebUrl` 生成对应的 Google 翻译网页地址。
+  - `TranslationResultPage` 支持多个目标语言，按顺序请求。中文输入时同一页显示英语和德语两段译文，每种语言各有复制命令（「复制英语译文」「复制德语译文」）和网页链接；某个语言失败时只在它的位置显示错误。只有一个目标语言时，输出格式不变。
+  - 中文输入（`DictionaryPage.Chinese.cs`）：「翻译」组里先放「Google 翻译成英语和德语」（在线翻译开关打开时），再放 AI 项（AI 开着时）。词语放在词典结果之后，句子或部分匹配放在最前。
+    - 原来的「AI 翻译」组改名为「翻译」。
+    - 每个排在前面的翻译项占一行，标题也占一行，英语结果相应减少，保证德语组仍在第一屏：只有 AI 时 4 条，两项都有时 3 条。
+  - 英/德句子：词典页和独立的「Lexi 句子翻译」页都先列 Google「翻译这句话」（开关打开时），再列 Claude「AI 翻译这句话」（AI 开着时，`TranslateSentence`）。
+  - 设置里的开关改名为「启用 Google 在线翻译」，说明两个方向和非官方接口。保存时的 ID 仍是 `ai.sentenceTranslation`，已有的设置不受影响。
+- 验证：
+  - 单元测试 188 个全部通过，新增目标语言和非法语言两项；
+  - 自检 61/61（新增「Google 和 Claude 并列」一步，英/德句子的两项也有检查）；
+  - 加 `-Translation` 的联网自检 63/63：`我想学习德语。` → "I want to learn German." | "Ich möchte Deutsch lernen."（1.6 秒）；英/德 → 中照常。
+- 界面实测：用户用 `install.ps1 -SkipBuild` 装上 15:47 的包（已安装的 DLL 与包内哈希一致），在设置里打开在线翻译并 Reload 之后运行 `artifacts\cmdpal-verify\verify7.ps1`，12/12 通过，用时 65 秒，截图 50–58：
+  - 首页提示有「在线翻译（Google）」，AI 提示里有「输入句子或中文可让 AI 翻译」；
+  - `房子`：英语 house / bure / dhar，德语 das Haus / hauseigen，「翻译」组依次是 Google、「AI 讲解「房子」的英语和德语说法」（截图 51）；
+  - `我想学习德语。`：最前面是「翻译」组（Google、AI），之后是英语 study / learn / German，「德语 Deutsch」组（lernen、das Deutsch）仍在第一屏（截图 52）；
+  - Google 结果页显示「中文 → 英语」I want to learn German.、「中文 → 德语」Ich möchte Deutsch lernen.；Enter 复制英语译文，Ctrl+Enter 复制德语译文（截图 53）；
+  - AI 结果页（Claude Code，用户配置的模型）20 秒，英、德分节并带要点讲解（截图 54）；
+  - 英语句子：先「翻译这句话」，再「AI 翻译这句话」（截图 55）；Google 译成「今天天气真好」；AI 用了 4 秒（截图 56、57）；
+  - 德语句子和独立的「Lexi 句子翻译」页里，这两项的顺序也一样（截图 58）。
+
 ## 待办
 
-1. **用户在普通终端操作**：再运行一次 `install.ps1 -SkipBuild`，装上 AI 页的修复（`artifacts\msix` 里的包已经是最新的）；然后在 CmdPal 里执行 Reload，清理设置里重复的 Lexi 条目。
-2. 用户方便时再验证两项：
+1. 用户方便时再验证两项：
    - 发音（Ctrl+P，会出声）；
    - 设置里 Lexi 详情页的表单和别名（Alias `dict`，Indirect）。
-3. Ctrl+I 打开的页面里 Esc 无效是宿主问题。可以考虑向 PowerToys 报告，扩展这边不需要改。
-4. （可选）签名发布：`package.ps1 -Sign` 会生成自签名证书。在其他电脑上信任证书需要管理员权限，执行前先征得用户同意。
-5. （可选）FreeDict deu-eng 作为用户本机可选的补充来源（GPL/AGPL，不要合并进可分发的数据库）。
-6. （可选）中文反查外语（目前交给 AI 处理）。
-7. 还没有提交任何 git 提交。用户要求时再提交，提交信息末尾加 `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`。
+2. Ctrl+I 打开的页面里 Esc 无效是宿主问题。可以考虑向 PowerToys 报告，扩展这边不需要改。
+3. （可选）签名发布：`package.ps1 -Sign` 会生成自签名证书。在其他电脑上信任证书需要管理员权限，执行前先征得用户同意。
+4. （可选）FreeDict deu-eng 作为用户本机可选的补充来源（GPL/AGPL，不要合并进可分发的数据库）。
+5. `master` 还停在首次提交 4a76679；中文反查和双向翻译（Phase 6–7）只提交到了 `feature/lexi-dictionary`，要不要合并到 `master` 由用户决定。以后的改动也是用户要求时再提交，提交信息末尾加 `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`。

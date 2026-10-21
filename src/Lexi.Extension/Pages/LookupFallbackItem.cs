@@ -1,4 +1,5 @@
 using Lexi.Core.Search;
+using Lexi.Core.Text;
 using Lexi.Extension.Services;
 using Microsoft.CommandPalette.Extensions.Toolkit;
 
@@ -6,9 +7,10 @@ namespace Lexi.Extension.Pages;
 
 /// <summary>
 /// Main-page fallback: shows a one-line definition for what the user types on the Command Palette home page,
-/// e.g. "dict vulnerability" or (if enabled in settings) just "vulnerability". Enter opens the Lexi page with
-/// the query pre-filled. The host calls UpdateQuery on background threads for every keystroke, so only the
-/// cheap exact/inflection lookup runs here (no fuzzy search), and stale updates are discarded.
+/// e.g. "dict vulnerability" or (if enabled in settings) just "vulnerability"; for Chinese ("dict 房子") the best
+/// English and German equivalents. Enter opens the Lexi page with the query pre-filled. The host calls
+/// UpdateQuery on background threads for every keystroke, so only the cheap exact/inflection lookup runs here
+/// (no fuzzy search, no partial Chinese matches), and stale updates are discarded.
 /// </summary>
 internal sealed partial class LookupFallbackItem : FallbackCommandItem
 {
@@ -43,7 +45,13 @@ internal sealed partial class LookupFallbackItem : FallbackCommandItem
         }
 
         var q = QueryInfo.Parse(text);
-        if (q.IsEmpty || q.HasCjk || q.LetterCount < 2 || (!explicitPrefix && q.WordCount > 2))
+        if (q.HasCjk)
+        {
+            UpdateChinese(gen, explicitPrefix, text);
+            return;
+        }
+
+        if (q.IsEmpty || q.LetterCount < 2 || (!explicitPrefix && q.WordCount > 2))
         {
             Clear(gen);
             return;
@@ -88,6 +96,55 @@ internal sealed partial class LookupFallbackItem : FallbackCommandItem
         Command = new DictionaryPage(_hub, explicitPrefix ? text : w.Word);
         Title = $"{via}{WordItems.DisplayTitle(w)} — {w.Brief}";
         Subtitle = $"Lexi · {(w.Lang == Core.Models.Lang.De ? "Deutsch" : "English")} · 回车查看完整释义";
+    }
+
+    /// <summary>Chinese input: the best English and the best German equivalent ("房子 → house · das Haus").</summary>
+    private void UpdateChinese(long gen, bool explicitPrefix, string text)
+    {
+        // Without a prefix, only words: a single character is too ambiguous and sentences are not lookups.
+        var length = ChineseTerms.QueryKey(text).Length;
+        if (!explicitPrefix && (length < 2 || DictionaryPage.IsChineseSentence(text)))
+        {
+            Clear(gen);
+            return;
+        }
+
+        SearchResult result;
+        try
+        {
+            result = _hub.Dictionary.Lookup(text);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            Clear(gen);
+            return;
+        }
+
+        if (Interlocked.Read(ref _generation) != gen)
+        {
+            return;
+        }
+
+        var best = result.Hits.Where(h => h.Kind == MatchKind.Chinese).DistinctBy(h => h.Word.Lang).ToList();
+        if (best.Count == 0)
+        {
+            if (explicitPrefix)
+            {
+                Command = new DictionaryPage(_hub, text);
+                Title = $"在 Lexi 中查找「{text}」";
+                Subtitle = "Lexi · 没有完全对应的词，回车查看部分匹配";
+            }
+            else
+            {
+                Clear(gen);
+            }
+
+            return;
+        }
+
+        Command = new DictionaryPage(_hub, text);
+        Title = $"{text} → {string.Join(" · ", best.Select(h => WordItems.DisplayTitle(h.Word)))}";
+        Subtitle = "Lexi · 中文反查 · 回车查看全部英语和德语对应词";
     }
 
     private static (bool Explicit, string Text) Strip(string query)

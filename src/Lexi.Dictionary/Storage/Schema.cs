@@ -65,6 +65,19 @@ internal static class Schema
         ) WITHOUT ROWID;
         """;
 
+    /// <summary>
+    /// Reverse (中 → 英/德) index built by <see cref="Import.ZhIndexBuilder"/>. Optional: databases built before it
+    /// existed still open, they just cannot answer Chinese queries.
+    /// </summary>
+    public const string CreateZhIndex = """
+        CREATE TABLE zh_index (
+            term    TEXT NOT NULL,     -- a term of a Chinese definition (simplified)
+            word_id INTEGER NOT NULL,
+            weight  INTEGER NOT NULL,  -- 1..100 by position and reliability, +6 per further source that agrees
+            PRIMARY KEY (term, word_id)
+        ) WITHOUT ROWID;
+        """;
+
     /// <summary>Created after the bulk load (faster import).</summary>
     public const string CreateIndexes = """
         CREATE INDEX ix_words_fold ON words(fold, zipf, lang);

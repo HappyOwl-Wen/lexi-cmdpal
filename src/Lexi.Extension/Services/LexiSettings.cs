@@ -15,6 +15,13 @@ internal sealed class LexiSettings : JsonSettingsManager
         "仅在你主动触发时调用本机 Claude Code CLI（claude -p）；会消耗你的 Claude Code 用量。关闭后 AI 入口全部隐藏。",
         true);
 
+    // Preserve the original persisted ID; this option is independent of the AI master switch.
+    private readonly ToggleSetting _sentenceTranslation = new(
+        "ai.sentenceTranslation",
+        "启用 Google 在线翻译",
+        "英语/德语句子 → 中文，中文 → 英语和德语，并显示独立的「Lexi 句子翻译」命令。按 Enter 才把文字发送到 Google 翻译的非官方免 Key 接口（不是官方 Cloud API，可能限流或失效）。不调用 Claude Code，关闭 AI 增强也可用。默认关闭。",
+        false);
+
     private readonly TextSetting _claudePath = new(
         "ai.claudePath",
         "Claude Code 可执行文件路径",
@@ -65,6 +72,7 @@ internal sealed class LexiSettings : JsonSettingsManager
         FilePath = Path.Combine(directory, "settings.json");
         DataDirectory = directory;
 
+        Settings.Add(_sentenceTranslation);
         Settings.Add(_aiEnabled);
         Settings.Add(_claudePath);
         Settings.Add(_model);
@@ -88,6 +96,8 @@ internal sealed class LexiSettings : JsonSettingsManager
     public string DataDirectory { get; }
 
     public bool AiEnabled => _aiEnabled.Value;
+
+    public bool SentenceTranslationEnabled => _sentenceTranslation.Value;
 
     public string? ClaudePath => Blank(_claudePath.Value);
 

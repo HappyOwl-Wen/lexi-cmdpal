@@ -37,7 +37,7 @@ internal sealed partial class DictionaryPage : DynamicListPage, IDisposable
         Name = "打开词典";
         Title = "Lexi 词典";
         Icon = IconHelpers.FromRelativePath("Assets\\LexiIcon.png");
-        PlaceholderText = "输入英语或德语单词（支持拼写纠错、词形还原、ae/oe/ue）…";
+        PlaceholderText = "输入英语或德语单词，或输入中文查英语/德语说法…";
         ShowDetails = true;
         Filters = _filters;
         _filters.PropChanged += (_, e) =>
@@ -215,6 +215,11 @@ internal sealed partial class DictionaryPage : DynamicListPage, IDisposable
     private IListItem[] BuildResults(string text, CancellationToken ct)
     {
         var q = QueryInfo.Parse(text);
+        if (q.HasCjk)
+        {
+            return BuildChineseResults(q, ct);
+        }
+
         var items = new List<IListItem>();
         var ai = _hub.AiEnabled;
         var lookup = text;
@@ -229,9 +234,18 @@ internal sealed partial class DictionaryPage : DynamicListPage, IDisposable
             items.Add(AiItem(AiTaskKind.ExplainInContext, term, null, domain, $"AI 专业语境：{term} @ {domain}", "解释该术语在此领域中的含义"));
             lookup = term;
         }
-        else if (ai && (q.IsSentence || q.HasCjk))
+        else if (q.IsSentence)
         {
-            items.Add(AiItem(AiTaskKind.TranslateSentence, q.Clean, null, null, "AI 翻译这句话", q.HasCjk ? "中文反查暂不支持，可让 AI 翻译/解释" : "按 Enter 调用 Claude Code 翻译并讲解要点"));
+            // A sentence: online translation when enabled, then Claude Code when AI is on; dictionary results follow.
+            if (_hub.SentenceTranslationEnabled && SentenceTranslationPage.CanTranslate(q))
+            {
+                items.Add(SentenceTranslationPage.TranslationItem(_hub, q.Clean));
+            }
+
+            if (ai)
+            {
+                items.Add(SentenceTranslationPage.AiTranslationItem(_hub, q.Clean));
+            }
         }
 
         if (!_hub.Dictionary.EnsureLoaded())
@@ -303,8 +317,8 @@ internal sealed partial class DictionaryPage : DynamicListPage, IDisposable
 
         items.Add(new ListItem(new NoOpCommand())
         {
-            Title = "输入英语或德语单词开始查询",
-            Subtitle = "拼写纠错（vulnerabilty）· 词形还原（Häuser→Haus、ging→gehen）· ae/oe/ue→ä/ö/ü · → 键接受纠错",
+            Title = "输入英语或德语单词开始查询，也可以输入中文",
+            Subtitle = "拼写纠错（vulnerabilty）· 词形还原（Häuser→Haus、ging→gehen）· ae/oe/ue→ä/ö/ü · 中文反查（房子→house / das Haus）",
             Icon = Glyphs.Lightbulb,
             Section = "提示",
         });
@@ -314,8 +328,19 @@ internal sealed partial class DictionaryPage : DynamicListPage, IDisposable
             items.Add(new ListItem(new NoOpCommand())
             {
                 Title = "AI（Claude Code，按需调用）",
-                Subtitle = "选中词条后 Ctrl+I 解释 · Ctrl+G 德语语法 · 输入「A vs B」辨析 · 「词 @领域」· 输入句子翻译",
+                Subtitle = "选中词条后 Ctrl+I 解释 · Ctrl+G 德语语法 · 输入「A vs B」辨析 · 「词 @领域」· 输入句子或中文可让 AI 翻译",
                 Icon = Glyphs.Ai,
+                Section = "提示",
+            });
+        }
+
+        if (_hub.SentenceTranslationEnabled)
+        {
+            items.Add(new ListItem(new NoOpCommand())
+            {
+                Title = "在线翻译（Google）",
+                Subtitle = "英语/德语句子 → 中文 · 中文 → 英语和德语 · 短句可用独立「Lexi 句子翻译」命令 · 按 Enter 才联网",
+                Icon = Glyphs.Translate,
                 Section = "提示",
             });
         }
@@ -328,7 +353,7 @@ internal sealed partial class DictionaryPage : DynamicListPage, IDisposable
             Icon = Glyphs.Info,
             Section = "提示",
         });
-        return [.. items];
+        return WithSectionHeaders(items);
     }
 
     private ListItem MissingDatabaseItem()

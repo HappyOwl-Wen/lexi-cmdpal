@@ -24,7 +24,7 @@ public sealed class ImportOptions
     public Action<string> Log { get; init; } = Console.WriteLine;
 }
 
-public sealed record ImportReport(string OutputPath, long Words, long Entries, long Forms, int FuzzyKeys, long FuzzyBytes, long FileBytes, TimeSpan Elapsed);
+public sealed record ImportReport(string OutputPath, long Words, long Entries, long Forms, int FuzzyKeys, long FuzzyBytes, long ChineseTerms, long FileBytes, TimeSpan Elapsed);
 
 /// <summary>Repeatable build of lexi.db from the raw downloads (see <see cref="RawFiles"/>).</summary>
 public static class LexiImporter
@@ -86,6 +86,9 @@ public static class LexiImporter
                 KaikkiImporter.Import(ctx, new KaikkiImporter.Options(
                     raw.WiktionaryZh, KaikkiEdition.Chinese, Lang.De, sourceIds["wikt-zh"], "kaikki:zhwiktionary", options.LimitPerSource));
 
+                log("Linking Chinese words to their English/German translations (Wiktionary, Chinese edition)…");
+                KaikkiImporter.ImportReverseLinks(ctx, raw.WiktionaryZh, sourceIds["wikt-zh"], "kaikki:zhwiktionary", options.LimitPerSource);
+
                 ctx.Complete();
                 log($"Entries: {ctx.EntryCount:N0}; staged forms: {ctx.StagedForms:N0}");
 
@@ -100,6 +103,10 @@ public static class LexiImporter
 
                 log("Building fuzzy index…");
                 var (fuzzyKeys, fuzzyBytes) = BuildFuzzyIndex(db, fuzzyForms);
+
+                log("Building Chinese reverse index…");
+                var (zhTerms, zhLinks) = ZhIndexBuilder.Build(db, log);
+                log($"  {zhTerms:N0} Chinese terms, {zhLinks:N0} links");
 
                 log("Creating indexes and statistics…");
                 Exec(db, "DROP TABLE stage_forms;");
@@ -123,7 +130,7 @@ public static class LexiImporter
                 File.Move(tmp, options.OutputPath, overwrite: true);
                 var size = new FileInfo(options.OutputPath).Length;
                 log($"Done: {options.OutputPath} ({size / 1048576.0:F1} MB) in {sw.Elapsed.TotalMinutes:F1} min");
-                return new ImportReport(options.OutputPath, wordCount, ctx.EntryCount, formCount, fuzzyKeys, fuzzyBytes, size, sw.Elapsed);
+                return new ImportReport(options.OutputPath, wordCount, ctx.EntryCount, formCount, fuzzyKeys, fuzzyBytes, zhTerms, size, sw.Elapsed);
             }
             catch
             {

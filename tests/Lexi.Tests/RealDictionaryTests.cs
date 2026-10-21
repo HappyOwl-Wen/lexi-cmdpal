@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Lexi.Core.Models;
 using Lexi.Core.Search;
+using Lexi.Core.Text;
 using Lexi.Dictionary.Quality;
 using Lexi.Dictionary.Storage;
 using Lexi.Dictionary.View;
@@ -34,16 +35,18 @@ public sealed class RealDictionaryFixture : IDisposable
 /// </summary>
 public sealed class RealDictionaryTests(RealDictionaryFixture f) : IClassFixture<RealDictionaryFixture>
 {
-    public static TheoryData<string> Queries() => new(AcceptanceCases.All.Select(c => c.Query));
+    // Chinese queries have one case per language, so a case is identified by query and language.
+    public static TheoryData<string, Lang> Queries() => new(AcceptanceCases.All.Select(c => (c.Query, c.Lang)));
 
     [Theory]
     [MemberData(nameof(Queries))]
-    public void Acceptance_case(string query)
+    public void Acceptance_case(string query, Lang lang)
     {
         Assert.SkipWhen(f.Engine is null, "Dictionary database not built (run: lexi import)");
-        var c = AcceptanceCases.All.Single(x => x.Query == query);
-        var hits = f.Engine!.Search(new SearchRequest { Text = c.Query, Limit = 10 }, TestContext.Current.CancellationToken).Hits.ToList();
-        var rank = hits.FindIndex(h => h.Word.Word == c.Expected && h.Word.Lang == c.Lang) + 1;
+        Assert.SkipWhen(TextNormalizer.HasCjk(query) && f.Db!.Info.ChineseTerms == 0, "Dictionary database has no Chinese index (rebuild: lexi import)");
+        var c = AcceptanceCases.All.Single(x => x.Query == query && x.Lang == lang);
+        var hits = f.Engine!.Search(new SearchRequest { Text = c.Query, Limit = 20 }, TestContext.Current.CancellationToken).Hits;
+        var rank = AcceptanceCases.RankOf(c, hits);
         Assert.True(rank > 0 && rank <= c.WithinTop, $"{c.Query}: expected {c.Expected} within top {c.WithinTop}, got rank {rank}: {string.Join(", ", hits.Take(5))}");
     }
 

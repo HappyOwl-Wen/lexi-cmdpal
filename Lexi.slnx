@@ -5,6 +5,7 @@
     <Project Path="src/Lexi.Core/Lexi.Core.csproj" />
     <Project Path="src/Lexi.Dictionary/Lexi.Dictionary.csproj" />
     <Project Path="src/Lexi.Extension/Lexi.Extension.csproj" />
+    <Project Path="src/Lexi.Translation/Lexi.Translation.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Lexi.Tests/Lexi.Tests.csproj" />

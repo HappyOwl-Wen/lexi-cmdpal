@@ -69,6 +69,19 @@ public static class PromptTemplates
                 sb.AppendLine("- 说明与日常含义的区别，并给一个该领域的例句（原文 + 中文）；");
                 sb.AppendLine("- 列出 2–3 个相关术语；");
                 break;
+
+            case AiTaskKind.TranslateChinese:
+                sb.AppendLine("请把下面的中文翻译成英语和德语，面向中文母语的英语/德语学习者，讲解用简体中文。");
+                sb.AppendLine();
+                sb.AppendLine("中文：");
+                sb.AppendLine(r.Input);
+                AppendContext(sb, r);
+                sb.AppendLine("要求：");
+                sb.AppendLine("- 先英语、后德语，各用一个小标题；德语名词带冠词（der/die/das）和复数；");
+                sb.AppendLine("- 如果是词语：每种语言给 1–3 个最常用的对应词，用一句话说明它们的区别或适用场景；");
+                sb.AppendLine("- 如果是句子：给出自然的英语译文和德语译文，再说明 1–2 个关键词的译法；");
+                sb.AppendLine("- 每种语言给一个短例句（原文 + 中文）；");
+                break;
         }
 
         sb.AppendLine("- 不要编造音标、词形或词典来源；不确定时明确说明；");

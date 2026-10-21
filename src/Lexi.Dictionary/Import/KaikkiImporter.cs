@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using Lexi.Core.Models;
 using Lexi.Core.Search;
+using Lexi.Core.Text;
 
 namespace Lexi.Dictionary.Import;
 
@@ -162,7 +163,26 @@ internal static class KaikkiImporter
             };
             if (s.Gloss.Length > 0)
             {
+                if (o.Lang == Lang.En)
+                {
+                    // Translation tables exist only on English entries of the English Wiktionary.
+                    s.Zh = AddMandarin(s.Zh, Arr(sense, "translations"));
+                }
+
                 senses.Add(s);
+            }
+        }
+
+        if (o.Lang == Lang.En && senses.Count > 0)
+        {
+            // Tables wiktextract could not attach to a sense: match their heading ("human abode") to a gloss.
+            foreach (var t in Arr(root, "translations"))
+            {
+                if (IsMandarin(t))
+                {
+                    var target = senses[BestSense(senses, Str(t, "sense"))];
+                    target.Zh = AddMandarin(target.Zh, [t]);
+                }
             }
         }
 
@@ -245,6 +265,12 @@ internal static class KaikkiImporter
         w.Flags |= WordFlags.HasEn;
         var brief = string.Join("; ", senses.Select(s => s.Gloss).Where(g => !string.IsNullOrEmpty(g)).Take(2));
         w.OfferBrief("en", TextCleanup.Truncate(brief, 90), o.Lang == Lang.De ? 5 : 10);
+        var zh = senses.SelectMany(s => s.Zh ?? []).Distinct().Take(4).ToList();
+        if (zh.Count > 0)
+        {
+            w.Flags |= WordFlags.HasZh;
+            w.OfferBrief("zh", TextCleanup.Truncate(string.Join("，", zh), 64), 12);
+        }
         if (o.Lang == Lang.De && grammar.Gender is not null && entry.Pos == "noun")
         {
             w.OfferBadge(Article(grammar.Gender), 5);
@@ -560,6 +586,207 @@ internal static class KaikkiImporter
     }
 
     // ---------------------------------------------------------------- helpers
+
+    /// <summary>
+    /// zh.wiktionary entries of Chinese words list English and German translations ("防火牆" → firewall, Firewall).
+    /// Every translation that is a headword of the dictionary gets one <see cref="EntryData.ReverseKind"/> entry
+    /// naming those Chinese words, so the 中 → 英/德 index finds it and its page shows where the link comes from.
+    /// Runs after the other sources: only headwords that already have entries are linked.
+    /// </summary>
+    public static void ImportReverseLinks(ImportContext ctx, string path, int sourceId, string refPrefix, int? limit)
+    {
+        var needleA = "\"lang_code\": \"zh\""u8.ToArray();
+        var needleB = "\"lang_code\":\"zh\""u8.ToArray();
+        var links = new Dictionary<WordAcc, List<ReverseLink>>();
+        using var reader = new Utf8LineReader(path);
+        long records = 0, count = 0;
+        var sw = Stopwatch.StartNew();
+        while (reader.TryReadLine(out var line))
+        {
+            var span = line.Span;
+            if (span.IndexOf("\"translations\""u8) < 0 || (span.IndexOf(needleA) < 0 && span.IndexOf(needleB) < 0))
+            {
+                continue;
+            }
+
+            using var doc = JsonDocument.Parse(line);
+            var root = doc.RootElement;
+            var word = Str(root, "word")?.Trim();
+            if (Str(root, "lang_code") != "zh" || string.IsNullOrEmpty(word) || word.Length > ChineseTerms.MaxTermLength || !word.All(ChineseTerms.IsHan))
+            {
+                continue;
+            }
+
+            records++;
+            var chinese = ChineseScript.ToSimplified(word);
+            var rawRef = $"{refPrefix}:{word}#{Str(root, "pos") ?? "other"}";
+            foreach (var t in Arr(root, "translations").Concat(Arr(root, "senses").SelectMany(s => Arr(s, "translations"))))
+            {
+                Lang? lang = Str(t, "lang_code") switch { "en" => Lang.En, "de" => Lang.De, _ => null };
+                if (lang is not { } l || TextCleanup.Normalize(Str(t, "word")) is not { } target || ResolveHeadword(ctx, l, target) is not { } acc)
+                {
+                    continue;
+                }
+
+                if (!links.TryGetValue(acc, out var list))
+                {
+                    links[acc] = list = [];
+                }
+
+                if (list.Count < 12 && !list.Any(x => x.Chinese == chinese))
+                {
+                    var sense = TextCleanup.Normalize(Str(t, "sense"));
+                    list.Add(new ReverseLink(chinese, sense is null ? null : TextCleanup.Truncate(ChineseScript.ToSimplified(sense), 40), rawRef));
+                    count++;
+                }
+            }
+
+            if (limit is not null && records >= limit)
+            {
+                break;
+            }
+        }
+
+        foreach (var (acc, list) in links)
+        {
+            ctx.AddEntry(acc, sourceId, new EntryData
+            {
+                Headword = acc.Word,
+                Kind = EntryData.ReverseKind,
+                Senses = list.Select(x => new Sense { Gloss = x.Chinese, GlossLang = "zh", Labels = x.Sense is null ? null : [x.Sense] }).ToList(),
+                RawRef = string.Join(", ", list.Select(x => x.RawRef).Distinct().Take(3)),
+            });
+            acc.Flags |= WordFlags.HasZh;
+            acc.OfferBrief("zh", TextCleanup.Truncate(string.Join("，", list.Select(x => x.Chinese).Take(4)), 64), 20);
+        }
+
+        ctx.Log($"  {refPrefix} (zh): {records:N0} Chinese entries with translations, {count:N0} links to {links.Count:N0} headwords in {sw.Elapsed.TotalSeconds:F0}s");
+    }
+
+    private sealed record ReverseLink(string Chinese, string? Sense, string RawRef);
+
+    /// <summary>The headword a translation names, as written or without "to " / "sich " ("to walk" → walk).</summary>
+    private static WordAcc? ResolveHeadword(ImportContext ctx, Lang lang, string target)
+    {
+        if (ctx.TryGetWord(lang, target, out var acc) && acc.Entries > 0)
+        {
+            return acc;
+        }
+
+        var bare = lang == Lang.En && target.StartsWith("to ", StringComparison.Ordinal) ? target[3..]
+            : lang == Lang.De && target.StartsWith("sich ", StringComparison.Ordinal) ? target[5..]
+            : null;
+        return bare is not null && ctx.TryGetWord(lang, bare, out acc) && acc.Entries > 0 ? acc : null;
+    }
+
+    // ---------------------------------------------------------------- Translation tables
+
+    /// <summary>Tags of Chinese varieties other than standard Mandarin (their words differ: Hokkien 厝 "house").</summary>
+    private static readonly HashSet<string> ChineseVarietyTags = new(StringComparer.Ordinal)
+    {
+        "Hokkien", "Dungan", "Cantonese", "Teochew", "Hakka", "Wu", "Min", "Min-Nan", "Min-Dong", "Jin", "Xiang", "Gan",
+        "Shanghainese", "Sichuanese", "Taishanese", "Classical-Chinese", "Literary-Chinese", "dialectal",
+    };
+
+    private static readonly HashSet<string> StopWords = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "with", "that", "from", "into", "which", "used", "being", "something", "someone", "other", "such", "their",
+        "this", "these", "those", "very", "have", "been", "especially", "usually", "often", "also", "more", "most",
+        "some", "than", "they", "them", "what", "when", "where", "whose",
+    };
+
+    /// <summary>Mandarin rows of an en.wiktionary translation table, and generic "Chinese" rows of no other variety.</summary>
+    private static bool IsMandarin(JsonElement t)
+    {
+        if ((Str(t, "lang_code") ?? Str(t, "code")) is not ("cmn" or "zh"))
+        {
+            return false;
+        }
+
+        var lang = Str(t, "lang") ?? string.Empty;
+        return lang.Contains("Mandarin", StringComparison.Ordinal)
+            || (lang == "Chinese" && !StrArr(t, "tags").Any(ChineseVarietyTags.Contains));
+    }
+
+    /// <summary>
+    /// Adds the simplified words of Mandarin translation rows (at most 8): "防火牆 /防火墙" → 防火墙. A row without a
+    /// word may give it in its note ("電腦 /电脑 (diànnǎo, literally …)"); rows with Latin letters are skipped.
+    /// </summary>
+    private static List<string>? AddMandarin(List<string>? list, IEnumerable<JsonElement> rows)
+    {
+        foreach (var t in rows)
+        {
+            if (!IsMandarin(t) || (Str(t, "word") ?? Str(t, "note")) is not { } text)
+            {
+                continue;
+            }
+
+            var paren = text.IndexOfAny(['(', '（']);
+            foreach (var part in (paren >= 0 ? text[..paren] : text).Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                if (part.Length > ChineseTerms.MaxTermLength || !part.All(ChineseTerms.IsHan))
+                {
+                    continue;
+                }
+
+                var zh = ChineseScript.ToSimplified(part);
+                list ??= [];
+                if (list.Count < 8 && !list.Contains(zh))
+                {
+                    list.Add(zh);
+                }
+            }
+        }
+
+        return list;
+    }
+
+    /// <summary>The sense whose gloss shares the most words with a translation table's heading; the first if none does.</summary>
+    private static int BestSense(List<Sense> senses, string? heading)
+    {
+        var words = ContentWords(heading);
+        var best = 0;
+        var bestShared = 0;
+        for (var i = 0; i < senses.Count && words.Count > 0; i++)
+        {
+            var shared = ContentWords(senses[i].Gloss).Count(words.Contains);
+            if (shared > bestShared)
+            {
+                best = i;
+                bestShared = shared;
+            }
+        }
+
+        return best;
+    }
+
+    private static HashSet<string> ContentWords(string? text)
+    {
+        var words = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (string.IsNullOrEmpty(text))
+        {
+            return words;
+        }
+
+        var start = -1;
+        for (var i = 0; i <= text.Length; i++)
+        {
+            if (i < text.Length && char.IsLetter(text[i]))
+            {
+                start = start < 0 ? i : start;
+                continue;
+            }
+
+            if (start >= 0 && i - start >= 4 && !StopWords.Contains(text[start..i]))
+            {
+                words.Add(text[start..i]);
+            }
+
+            start = -1;
+        }
+
+        return words;
+    }
 
     internal static string? CleanGermanForm(string form, string? separablePrefix)
     {

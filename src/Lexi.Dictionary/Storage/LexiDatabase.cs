@@ -8,7 +8,7 @@ namespace Lexi.Dictionary.Storage;
 
 public sealed record StoredEntry(SourceInfo Source, int Seq, string? Pos, EntryData Data);
 
-public sealed record DatabaseInfo(int SchemaVersion, string BuiltAt, long WordCount, long EntryCount, long FormCount, string Profile);
+public sealed record DatabaseInfo(int SchemaVersion, string BuiltAt, long WordCount, long EntryCount, long FormCount, string Profile, long ChineseTerms);
 
 /// <summary>
 /// Read-only access to lexi.db. One connection, prepared statements, a lock around every call:
@@ -29,6 +29,7 @@ public sealed class LexiDatabase : ILexiconStore, IDisposable
     private readonly SqliteCommand _entries;
     private readonly SqliteCommand _byId;
     private readonly SqliteCommand _formsOfLemma;
+    private readonly SqliteCommand? _chinese;
     private FuzzyIndex? _fuzzy;
     private bool _fuzzyLoaded;
     private bool _disposed;
@@ -66,7 +67,22 @@ public sealed class LexiDatabase : ILexiconStore, IDisposable
         _entries = Prepare("SELECT source_id, seq, pos, data FROM entries WHERE word_id = $id ORDER BY source_id, seq", "$id");
         _byId = Prepare($"SELECT {WordColumns} FROM words w WHERE w.id = $id", "$id");
         _formsOfLemma = Prepare("SELECT f.form, t.tags FROM forms f JOIN form_tags t ON t.id = f.tags_id WHERE f.lemma_id = $id LIMIT 400", "$id");
+
+        // The reverse index is optional (databases built before it existed lack it).
+        HasChineseIndex = Exists("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'zh_index'");
+        if (HasChineseIndex)
+        {
+            var zipf = SearchEngine.ChineseZipfWeight.ToString(CultureInfo.InvariantCulture);
+            _chinese = Prepare(
+                $"SELECT {WordColumns}, z.weight FROM zh_index z JOIN words w ON w.id = z.word_id WHERE z.term = $term AND ($lang = 0 OR w.lang = $lang) ORDER BY z.weight + w.zipf * {zipf} DESC LIMIT $limit",
+                "$term",
+                "$lang",
+                "$limit");
+        }
     }
+
+    /// <summary>True when the database can answer Chinese queries (see <see cref="Import.ZhIndexBuilder"/>).</summary>
+    public bool HasChineseIndex { get; }
 
     public string Path { get; }
 
@@ -200,6 +216,31 @@ public sealed class LexiDatabase : ILexiconStore, IDisposable
         }
     }
 
+    public IReadOnlyList<ZhMatch> GetWordsByChinese(string term, Lang? language, int limit)
+    {
+        if (_chinese is null || term.Length == 0)
+        {
+            return [];
+        }
+
+        // The index holds simplified Chinese (sources are converted at import); accept traditional input too.
+        var key = Import.ChineseScript.ToSimplified(term);
+        lock (_lock)
+        {
+            _chinese.Parameters[0].Value = key;
+            _chinese.Parameters[1].Value = (int)(language ?? Lang.Unknown);
+            _chinese.Parameters[2].Value = limit;
+            var list = new List<ZhMatch>();
+            using var r = _chinese.ExecuteReader();
+            while (r.Read())
+            {
+                list.Add(new ZhMatch(ReadWord(r, 0), key, r.GetInt32(8)));
+            }
+
+            return list;
+        }
+    }
+
     public WordRecord? GetWord(long id)
     {
         lock (_lock)
@@ -262,6 +303,8 @@ public sealed class LexiDatabase : ILexiconStore, IDisposable
             {
                 cmd.Dispose();
             }
+
+            _chinese?.Dispose();
 
             _connection.Dispose();
         }
@@ -381,7 +424,15 @@ public sealed class LexiDatabase : ILexiconStore, IDisposable
             Num("word_count"),
             Num("entry_count"),
             Num("form_count"),
-            meta.GetValueOrDefault("profile", "personal"));
+            meta.GetValueOrDefault("profile", "personal"),
+            Num("zh_terms"));
+    }
+
+    private bool Exists(string sql)
+    {
+        using var cmd = _connection.CreateCommand();
+        cmd.CommandText = sql;
+        return cmd.ExecuteScalar() is not null;
     }
 
     private Dictionary<int, SourceInfo> ReadSources()

@@ -7,13 +7,17 @@
   3. Registers that folder as a package — this requires Windows "Developer Mode".
   Command Palette picks the extension up automatically (or run "Reload" in Command Palette).
   The dictionary database (%LOCALAPPDATA%\Lexi\data\lexi.db) is built separately: scripts\import-data.ps1.
+.PARAMETER Database
+  A dictionary database built elsewhere (e.g. artifacts\data\lexi.db from `lexi import --out`) to install as
+  %LOCALAPPDATA%\Lexi\data\lexi.db, replacing the current one. The extension is stopped first (it keeps the file open).
 .NOTES
   To install on another PC without Developer Mode, sign the package with scripts\package.ps1 -Sign and trust
   the certificate there (that step needs administrator rights).
 #>
 param(
     [ValidateSet('x64', 'ARM64')] [string]$Platform = 'x64',
-    [switch]$SkipBuild
+    [switch]$SkipBuild,
+    [string]$Database
 )
 
 . "$PSScriptRoot\common.ps1"
@@ -25,6 +29,16 @@ if (-not (Test-DeveloperMode)) {
 }
 
 Move-LexiRedirectedData
+$databaseSource = $null
+if ($Database) {
+    # Relative paths may be given from the repository root, whatever the current directory is.
+    $candidates = @($Database)
+    if (-not [IO.Path]::IsPathRooted($Database)) { $candidates += Join-Path $RepoRoot $Database }
+    $databaseSource = $candidates | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+    if (-not $databaseSource) { throw "Database file not found: $($candidates -join ' or ')" }
+    $databaseSource = (Resolve-Path -LiteralPath $databaseSource).Path
+    Write-Host "Will install dictionary database $databaseSource"
+}
 
 $msix = & "$PSScriptRoot\package.ps1" -Platform $Platform -SkipBuild:$SkipBuild -PassThru
 $zip = [IO.Compression.ZipFile]::OpenRead($msix)
@@ -43,6 +57,16 @@ $appRoot = Join-Path $env:LOCALAPPDATA 'Lexi\app'
 $target = Join-Path $appRoot "$version-$Platform"
 
 Stop-LexiExtensionProcess
+if ($databaseSource) {
+    # Copy next to the target first, so an interrupted copy never leaves a truncated lexi.db behind.
+    $dataDir = Join-Path $env:LOCALAPPDATA 'Lexi\data'
+    New-Item -ItemType Directory -Force -Path $dataDir | Out-Null
+    $databaseTarget = Join-Path $dataDir 'lexi.db'
+    Copy-Item -LiteralPath $databaseSource -Destination "$databaseTarget.new" -Force
+    Move-Item -LiteralPath "$databaseTarget.new" -Destination $databaseTarget -Force
+    Write-Host ("Dictionary database installed: {0} ({1:N0} MB)" -f $databaseTarget, ((Get-Item -LiteralPath $databaseTarget).Length / 1MB))
+}
+
 $existing = Get-AppxPackage -Name $name
 if ($existing -and $existing.InstallLocation -ne $target) {
     Write-Host "Removing previous registration from $($existing.InstallLocation) (extension settings/history are reset)."

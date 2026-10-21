@@ -9,8 +9,18 @@ namespace Lexi.Core.Models;
 /// </summary>
 public sealed class EntryData
 {
+    /// <summary><see cref="Kind"/> of an entry whose senses are Chinese words listing this headword as a translation.</summary>
+    public const string ReverseKind = "reverse";
+
     [JsonPropertyName("h")]
     public string Headword { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Null for an ordinary entry. <see cref="ReverseKind"/>: each sense is a Chinese headword (simplified, with its
+    /// sense description as label) whose own entry lists this word as a translation — a link, not a definition.
+    /// </summary>
+    [JsonPropertyName("k")]
+    public string? Kind { get; set; }
 
     /// <summary>Normalized part of speech: noun, verb, adj, adv, pron, prep, conj, intj, num, det, article, particle, phrase, prefix, suffix, abbrev, name, other.</summary>
     [JsonPropertyName("p")]

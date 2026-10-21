@@ -1,5 +1,7 @@
 ﻿using Lexi.AI;
 
+using Lexi.Translation;
+
 namespace Lexi.Extension.Services;
 
 /// <summary>Process-wide services shared by pages and commands.</summary>
@@ -13,6 +15,7 @@ internal sealed partial class ServiceHub : IDisposable
         History = new HistoryStore(Settings.DataDirectory);
         Pronouncer = new Pronouncer(Settings.DataDirectory);
         Ai = new AiService(CreateProvider, Path.Combine(Settings.DataDirectory, "ai-cache"));
+        Translation = new GoogleTranslator();
     }
 
     public LexiSettings Settings { get; }
@@ -25,12 +28,17 @@ internal sealed partial class ServiceHub : IDisposable
 
     public AiService Ai { get; }
 
+    public GoogleTranslator Translation { get; }
+
     public bool AiEnabled => Settings.AiEnabled;
+
+    public bool SentenceTranslationEnabled => Settings.SentenceTranslationEnabled;
 
     public void Dispose()
     {
         Dictionary.Dispose();
         Pronouncer.Dispose();
+        Translation.Dispose();
     }
 
     private ClaudeCodeProvider CreateProvider() => new ClaudeCodeProvider(new ClaudeCodeOptions

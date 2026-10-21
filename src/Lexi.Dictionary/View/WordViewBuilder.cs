@@ -1,3 +1,4 @@
+using System.Globalization;
 using Lexi.Core.Models;
 using Lexi.Core.Morphology;
 using Lexi.Core.Search;
@@ -7,9 +8,11 @@ namespace Lexi.Dictionary.View;
 
 /// <summary>
 /// Aggregates the per-source entries of one headword. Order of preference:
-/// English words — Chinese: ECDICT; English: Wiktionary, then ECDICT; IPA: Wiktionary (UK/US), then ECDICT.
+/// English words — Chinese: ECDICT, then en.wiktionary translation tables; English: Wiktionary, then ECDICT;
+/// IPA: Wiktionary (UK/US), then ECDICT.
 /// German words — Chinese: zh.wiktionary glosses, then de.wiktionary sense translations; English: en.wiktionary,
 /// then de.wiktionary translations; grammar and IPA: de.wiktionary first.
+/// Both — last, Chinese headwords whose zh.wiktionary translation tables list the word.
 /// </summary>
 public static class WordViewBuilder
 {
@@ -45,13 +48,15 @@ public static class WordViewBuilder
                 pos.Add(partOfSpeech);
             }
 
+            // A reverse entry lists Chinese headwords whose entries name this word as a translation.
+            var reverse = d.Kind == EntryData.ReverseKind;
             var senses = d.Senses ?? [];
             var zh = senses.Where(s => s.GlossLang == "zh").ToList();
-            var en = senses.Where(s => s.GlossLang == "en").ToList();
-            var de = senses.Where(s => s.GlossLang == "de").ToList();
+            var en = reverse ? [] : senses.Where(s => s.GlossLang == "en").ToList();
+            var de = reverse ? [] : senses.Where(s => s.GlossLang == "de").ToList();
             if (zh.Count > 0)
             {
-                chinese.Add(new MeaningBlock(e.Source, "gloss", d.Pos, zh));
+                chinese.Add(new MeaningBlock(e.Source, reverse ? "reverse" : "gloss", d.Pos, zh));
                 used = true;
             }
 
@@ -59,6 +64,21 @@ public static class WordViewBuilder
             {
                 english.Add(new MeaningBlock(e.Source, "gloss", d.Pos, en));
                 used = true;
+
+                // en.wiktionary translation tables: Chinese equivalents, numbered like the English senses above.
+                var zhTr = en.Select((s, i) => new Sense
+                    {
+                        Number = s.Number ?? (i + 1).ToString(CultureInfo.InvariantCulture),
+                        Gloss = s.Zh is { Count: > 0 } list ? string.Join("，", list) : null,
+                        GlossLang = "zh",
+                    })
+                    .Where(s => s.Gloss is not null)
+                    .DistinctBy(s => s.Gloss, StringComparer.Ordinal)
+                    .ToList();
+                if (zhTr.Count > 0)
+                {
+                    chinese.Add(new MeaningBlock(e.Source, "translation", d.Pos, zhTr));
+                }
             }
 
             if (de.Count > 0)
@@ -151,8 +171,9 @@ public static class WordViewBuilder
             GrammarSource = grammarSource,
             Cases = cases,
             GrammarSummary = summary,
-            // Direct definitions before sense-aligned translation equivalents (OrderBy is stable).
-            Chinese = chinese.OrderBy(b => b.Kind == "gloss" ? 0 : 1).ToList(),
+            // Direct definitions, then sense-aligned translation equivalents, then links from Chinese headwords
+            // (OrderBy is stable, so the source order is kept within each kind).
+            Chinese = chinese.OrderBy(b => b.Kind switch { "gloss" => 0, "translation" => 1, _ => 2 }).ToList(),
             English = english.OrderBy(b => b.Kind == "gloss" ? 0 : 1).ToList(),
             German = german,
             Synonyms = synonyms.Take(8).ToList(),

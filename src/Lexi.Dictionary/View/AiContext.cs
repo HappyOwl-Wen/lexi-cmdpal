@@ -1,5 +1,6 @@
 using System.Text;
 using Lexi.Core.Models;
+using Lexi.Core.Search;
 
 namespace Lexi.Dictionary.View;
 
@@ -13,6 +14,25 @@ public static class AiContext
 
     /// <summary>Words to contrast with when the user asks for easily confused words without naming any.</summary>
     public static IReadOnlyList<string> CompareCandidates(WordView v) => v.Related.Concat(v.Synonyms).Distinct().Take(3).ToList();
+
+    /// <summary>The dictionary's English and German equivalents of a Chinese query, best first (null when none).</summary>
+    public static string? ChineseCandidates(IReadOnlyList<SearchHit> hits)
+    {
+        var sb = new StringBuilder();
+        foreach (var lang in new[] { Lang.En, Lang.De })
+        {
+            var words = hits.Where(h => h.Word.Lang == lang && h.Kind == MatchKind.Chinese)
+                .Select(h => lang == Lang.De && h.Word.Badge is "der" or "die" or "das" ? $"{h.Word.Badge} {h.Word.Word}" : h.Word.Word)
+                .Take(6)
+                .ToList();
+            if (words.Count > 0)
+            {
+                sb.Append("- 词典中的").Append(LanguageName(lang)).Append("对应词（按相关度）：").AppendLine(string.Join("、", words));
+            }
+        }
+
+        return sb.Length > 0 ? sb.ToString() : null;
+    }
 
     public static string Describe(WordView v)
     {

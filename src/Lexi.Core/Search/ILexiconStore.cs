@@ -24,4 +24,10 @@ public interface ILexiconStore
 
     /// <summary>Fuzzy automaton over fold keys, or null when unavailable (search then skips spelling correction).</summary>
     FuzzyIndex? GetFuzzyIndex();
+
+    /// <summary>
+    /// Reverse lookup: headwords whose Chinese definition contains <paramref name="term"/> as a whole term,
+    /// best candidates first (term weight and popularity). Empty when the store has no Chinese index.
+    /// </summary>
+    IReadOnlyList<ZhMatch> GetWordsByChinese(string term, Lang? language, int limit);
 }

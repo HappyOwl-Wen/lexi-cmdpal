@@ -5,6 +5,7 @@ using Lexi.AI;
 using Lexi.Cli;
 using Lexi.Core.Models;
 using Lexi.Core.Search;
+using Lexi.Core.Text;
 using Lexi.Dictionary.Import;
 using Lexi.Dictionary.Quality;
 using Lexi.Dictionary.Storage;
@@ -27,6 +28,7 @@ try
         "bench" => Commands.Bench(cli),
         "stats" => Commands.Stats(cli),
         "ai" => await Commands.AiAsync(cli),
+        "zh-index" => Commands.ZhIndex(cli),
         _ => Commands.Help(),
     };
 }
@@ -103,7 +105,8 @@ namespace Lexi.Cli
                   quality                                        acceptance list (pass/fail)
                   bench    [--rounds N] [--sample N] [--out FILE] latency benchmark
                   stats                                          database statistics
-                  ai       <text> [--kind explain|grammar|compare|translate|context] [--with A,B]
+                  zh-index --out PATH [--from DB]                copy a database and add the Chinese reverse index
+                  ai       <text> [--kind explain|grammar|compare|translate|context|chinese] [--with A,B]
                            [--domain D] [--model M] [--effort low|medium|high] [--timeout S]
                            [--no-cache] [--prompt]               one Claude Code request (claude -p), streamed;
                                                                  --prompt only prints the prompt (no request)
@@ -172,7 +175,29 @@ namespace Lexi.Cli
                 IncludeEcdict = !a.Has("no-ecdict"),
                 Log = msg => Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] {msg}"),
             });
-            Console.WriteLine($"words {report.Words:N0}, entries {report.Entries:N0}, forms {report.Forms:N0}, fuzzy keys {report.FuzzyKeys:N0} ({report.FuzzyBytes / 1048576.0:F1} MB), file {report.FileBytes / 1048576.0:F1} MB");
+            Console.WriteLine($"words {report.Words:N0}, entries {report.Entries:N0}, forms {report.Forms:N0}, fuzzy keys {report.FuzzyKeys:N0} ({report.FuzzyBytes / 1048576.0:F1} MB), Chinese terms {report.ChineseTerms:N0}, file {report.FileBytes / 1048576.0:F1} MB");
+            return 0;
+        }
+
+        /// <summary>Copies a database and adds the Chinese reverse index to the copy (no re-import needed).</summary>
+        public static int ZhIndex(Args a)
+        {
+            var from = a.Get("from") ?? a.Db;
+            var output = a.Get("out") ?? throw new InvalidOperationException("--out is required (the source database is not modified)");
+            if (RefuseRedirectedWrites(output))
+            {
+                return 3;
+            }
+
+            var sw = Stopwatch.StartNew();
+            Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(output))!);
+            var tmp = output + ".building";
+            File.Copy(from, tmp, overwrite: true);
+            void Log(string msg) => Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] {msg}");
+            Log($"Building Chinese reverse index in a copy of {from}…");
+            var (terms, links) = ZhIndexBuilder.AddTo(tmp, Log);
+            File.Move(tmp, output, overwrite: true);
+            Console.WriteLine($"{terms:N0} Chinese terms, {links:N0} links; {output} ({new FileInfo(output).Length / 1048576.0:F1} MB) in {sw.Elapsed.TotalSeconds:F0} s");
             return 0;
         }
 
@@ -218,10 +243,18 @@ namespace Lexi.Cli
             using var db = LexiDatabase.Open(a.Db);
             var engine = new SearchEngine(db);
             var failures = 0;
+            var skipped = 0;
             foreach (var c in AcceptanceCases.All)
             {
-                var r = engine.Search(new SearchRequest { Text = c.Query, Limit = 10 });
-                var rank = r.Hits.ToList().FindIndex(h => h.Word.Word == c.Expected && h.Word.Lang == c.Lang) + 1;
+                if (TextNormalizer.HasCjk(c.Query) && !db.HasChineseIndex)
+                {
+                    skipped++;
+                    Console.WriteLine($"SKIP  {c.Query,-16} → {c.Expected,-15} (no Chinese reverse index in this database)");
+                    continue;
+                }
+
+                var r = engine.Search(new SearchRequest { Text = c.Query, Limit = 20 });
+                var rank = AcceptanceCases.RankOf(c, r.Hits);
                 var ok = rank > 0 && rank <= c.WithinTop;
                 if (!ok)
                 {
@@ -232,7 +265,9 @@ namespace Lexi.Cli
                 Console.WriteLine($"{(ok ? "PASS" : "FAIL")}  {c.Query,-16} → {c.Expected,-15} rank {(rank == 0 ? "-" : rank.ToString(CultureInfo.InvariantCulture)),-2} (≤{c.WithinTop})  {r.Elapsed.TotalMilliseconds,6:F2} ms  top: {top}");
             }
 
-            Console.WriteLine(failures == 0 ? $"All {AcceptanceCases.All.Count} cases passed." : $"{failures} of {AcceptanceCases.All.Count} cases FAILED.");
+            var run = AcceptanceCases.All.Count - skipped;
+            var skipNote = skipped > 0 ? $" {skipped} skipped (rebuild the database for the Chinese cases)." : string.Empty;
+            Console.WriteLine((failures == 0 ? $"All {run} cases passed." : $"{failures} of {run} cases FAILED.") + skipNote);
             return failures == 0 ? 0 : 2;
         }
 
@@ -245,6 +280,7 @@ namespace Lexi.Cli
             Console.WriteLine($"headwords  {info.WordCount:N0}");
             Console.WriteLine($"entries    {info.EntryCount:N0}");
             Console.WriteLine($"forms      {info.FormCount:N0}");
+            Console.WriteLine($"chinese    {(db.HasChineseIndex ? $"{info.ChineseTerms:N0} terms (reverse lookup)" : "no reverse index (run lexi zh-index)")}");
             var sw = Stopwatch.StartNew();
             var fuzzy = db.GetFuzzyIndex();
             Console.WriteLine($"fuzzy      {fuzzy?.KeyCount:N0} keys, {fuzzy?.StateCount:N0} states, {fuzzy?.EdgeCount:N0} edges, ~{(fuzzy?.SizeInBytes ?? 0) / 1048576.0:F1} MB in memory, loaded in {sw.ElapsedMilliseconds} ms");
@@ -264,24 +300,32 @@ namespace Lexi.Cli
             var text = string.Join(' ', a.Rest);
             if (text.Length == 0)
             {
-                Console.Error.WriteLine("usage: lexi ai <text> [--kind explain|grammar|compare|translate|context] …");
+                Console.Error.WriteLine("usage: lexi ai <text> [--kind explain|grammar|compare|translate|context|chinese] …");
                 return 1;
             }
 
             var kind = a.Get("kind") switch
             {
+                null when TextNormalizer.HasCjk(text) => AiTaskKind.TranslateChinese,
                 null or "explain" => AiTaskKind.ExplainWord,
                 "grammar" => AiTaskKind.ExplainGrammar,
                 "compare" => AiTaskKind.CompareWords,
                 "translate" => AiTaskKind.TranslateSentence,
                 "context" => AiTaskKind.ExplainInContext,
+                "chinese" => AiTaskKind.TranslateChinese,
                 var k => throw new InvalidOperationException($"unknown --kind {k}"),
             };
 
             string? language = null;
             string? context = null;
             var compareWith = a.Get("with")?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
-            if (kind != AiTaskKind.TranslateSentence && (a.Has("db") || DataPaths.FindDatabase() is not null))
+            if (kind == AiTaskKind.TranslateChinese && (a.Has("db") || DataPaths.FindDatabase() is not null))
+            {
+                // Same reference material as the extension: the dictionary's own equivalents.
+                using var db = LexiDatabase.Open(a.Db);
+                context = AiContext.ChineseCandidates(new SearchEngine(db).Search(new SearchRequest { Text = text, Limit = 20 }).Hits);
+            }
+            else if (kind is not (AiTaskKind.TranslateSentence or AiTaskKind.TranslateChinese) && (a.Has("db") || DataPaths.FindDatabase() is not null))
             {
                 using var db = LexiDatabase.Open(a.Db);
                 var hit = new SearchEngine(db).Search(new SearchRequest { Text = text, Language = a.Lang, Limit = 1, Fuzzy = false }).Hits.FirstOrDefault();

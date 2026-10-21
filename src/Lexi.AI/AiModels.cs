@@ -12,6 +12,8 @@ public enum AiTaskKind
     TranslateSentence,
     /// <summary>A term in a professional context (e.g. IT security).</summary>
     ExplainInContext,
+    /// <summary>Chinese input (a word or a sentence) → English and German.</summary>
+    TranslateChinese,
 }
 
 /// <summary>What the user asked for, plus local dictionary facts the model may rely on.</summary>

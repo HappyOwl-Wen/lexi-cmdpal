@@ -205,6 +205,8 @@ public static class MarkdownRenderer
             MatchKind.Translit => $"按德语转写匹配：ae/oe/ue/ss → ä/ö/ü/ß",
             MatchKind.Fold => "忽略变音符号匹配",
             MatchKind.Fuzzy or MatchKind.FuzzyForm => $"拼写纠正（编辑距离 {hit.Distance}）",
+            MatchKind.Chinese => $"中文反查：「{Escape(hit.Matched ?? string.Empty)}」→ **{Escape(v.Word.Word)}**（见下方中文释义或对应词）",
+            MatchKind.ChinesePart => $"部分匹配：词典没有整个输入的对应词，这是其中「{Escape(hit.Matched ?? string.Empty)}」的对应词",
             _ => null,
         };
         if (note is not null)
@@ -222,7 +224,12 @@ public static class MarkdownRenderer
 
         foreach (var block in blocks.Take(maxBlocks))
         {
-            var kind = block.Kind == "translation" ? "（按义项的对应词）" : string.Empty;
+            var kind = block.Kind switch
+            {
+                "translation" => "（按义项的对应词）",
+                "reverse" => "（中文词条的译词表收录此词）",
+                _ => string.Empty,
+            };
             sb.AppendLine().Append("**").Append(heading).Append("**").Append(kind).Append("  *— ").Append(Escape(block.Source.Name)).AppendLine("*").AppendLine();
             var n = 0;
             foreach (var s in block.Senses)

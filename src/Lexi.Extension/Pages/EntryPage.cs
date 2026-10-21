@@ -57,9 +57,9 @@ internal sealed partial class EntryPage : ContentPage
 
         _hub.History.Add(word.Word, word.Lang, word.Brief);
         var body = MarkdownRenderer.Full(view);
-        if (_hit is { IsForm: true } || _hit is { IsCorrection: true } || _hit?.Kind is MatchKind.Translit or MatchKind.Fold)
+        if (_hit is { IsForm: true } || _hit is { IsCorrection: true } || _hit?.Kind is MatchKind.Translit or MatchKind.Fold or MatchKind.Chinese or MatchKind.ChinesePart)
         {
-            // Repeat why this entry was shown (e.g. "Häuser is the plural of Haus").
+            // Repeat why this entry was shown (e.g. "Häuser is the plural of Haus", "房子 → house").
             var details = MarkdownRenderer.Details(view, _hit, includeTitle: false);
             var note = details.Split('\n').FirstOrDefault(l => l.StartsWith("> ", StringComparison.Ordinal));
             if (note is not null)

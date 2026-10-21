@@ -10,6 +10,8 @@
   Also run one real Claude Code request (uses your Claude Code quota).
 .PARAMETER Network
   Also download one pronunciation recording from Wikimedia Commons (not played).
+.PARAMETER Translation
+  Also translate two sample sentences through Google (no Claude or API key).
 #>
 param(
     [ValidateSet('Debug', 'Release')] [string]$Configuration = 'Debug',
@@ -17,7 +19,8 @@ param(
     [string]$MsixPath,
     [switch]$Installed,
     [switch]$Ai,
-    [switch]$Network
+    [switch]$Network,
+    [switch]$Translation
 )
 
 . "$PSScriptRoot\common.ps1"
@@ -46,6 +49,7 @@ $report = Join-Path ([IO.Path]::GetTempPath()) 'lexi-selftest.txt'
 $arguments = @('--self-test', "`"$report`"")
 if ($Ai) { $arguments += '--ai' }
 if ($Network) { $arguments += '--network' }
+if ($Translation) { $arguments += '--translation' }
 
 Write-Host "Running $exe --self-test"
 $code = 1

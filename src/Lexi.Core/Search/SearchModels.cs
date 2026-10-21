@@ -46,7 +46,17 @@ public enum MatchKind : byte
     Prefix,
     Fuzzy,
     FuzzyForm,
+    /// <summary>Chinese query: the input is a term of the headword's Chinese definition (reverse lookup).</summary>
+    Chinese,
+    /// <summary>Chinese query: only a part of the input is such a term ("网络安全漏洞" → 安全漏洞).</summary>
+    ChinesePart,
 }
+
+/// <summary>
+/// A headword linked to a Chinese term by a definition or translation table; <see cref="Weight"/> (1–100, plus a
+/// bonus when several sources agree) says how central the term is.
+/// </summary>
+public sealed record ZhMatch(WordRecord Word, string Term, int Weight);
 
 public sealed class SearchRequest
 {

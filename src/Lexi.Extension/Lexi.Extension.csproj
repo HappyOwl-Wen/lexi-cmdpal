@@ -68,6 +68,7 @@
     <ProjectReference Include="..\Lexi.Core\Lexi.Core.csproj" />
     <ProjectReference Include="..\Lexi.Dictionary\Lexi.Dictionary.csproj" />
     <ProjectReference Include="..\Lexi.AI\Lexi.AI.csproj" />
+    <ProjectReference Include="..\Lexi.Translation\Lexi.Translation.csproj" />
   </ItemGroup>
 
   <PropertyGroup Condition="'$(DisableHasPackageAndPublishMenuAddedByProject)'!='true' and '$(EnableMsixTooling)'=='true'">

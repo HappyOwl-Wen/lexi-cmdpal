@@ -80,6 +80,15 @@ internal sealed partial class AiPage : ContentPage
             _answer = null;
         }
 
+        // A previously displayed command can still be opened or regenerated after its setting is switched off.
+        if (!_hub.AiEnabled)
+        {
+            _content.Body = "此 AI 功能已关闭，请在 Lexi 设置中重新启用后再试。";
+            ShowCommands(loading: false, answered: false);
+            IsLoading = false;
+            return;
+        }
+
         IsLoading = true;
         ShowCommands(loading: true, answered: false);
         var queued = _hub.Ai.IsBusy ? "（排队中：另一个 AI 请求正在进行）" : string.Empty;

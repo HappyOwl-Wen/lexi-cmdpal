@@ -9,6 +9,7 @@ internal sealed class MemoryStore : ILexiconStore
 {
     private readonly List<WordRecord> _words = [];
     private readonly List<FormRecord> _forms = [];
+    private readonly List<(string Term, WordRecord Word, int Weight)> _chinese = [];
     private FuzzyIndex? _fuzzy;
 
     public MemoryStore Word(string word, Lang lang, float zipf, string? brief = null, WordFlags flags = WordFlags.None)
@@ -24,6 +25,20 @@ internal sealed class MemoryStore : ILexiconStore
         _fuzzy = null;
         return this;
     }
+
+    /// <summary>A term of the word's Chinese definition, with its index weight (1–100).</summary>
+    public MemoryStore Chinese(string term, string word, Lang lang, int weight = 100)
+    {
+        _chinese.Add((term, _words.Single(w => w.Word == word && w.Lang == lang), weight));
+        return this;
+    }
+
+    public IReadOnlyList<ZhMatch> GetWordsByChinese(string term, Lang? language, int limit) =>
+        _chinese.Where(c => c.Term == term && (language is null || c.Word.Lang == language))
+            .Select(c => new ZhMatch(c.Word, c.Term, c.Weight))
+            .OrderByDescending(m => m.Weight + (m.Word.Zipf * SearchEngine.ChineseZipfWeight))
+            .Take(limit)
+            .ToList();
 
     public IReadOnlyList<WordRecord> GetWordsByFold(string fold, Lang? language) =>
         _words.Where(w => w.Fold == fold && (language is null || w.Lang == language)).ToList();
@@ -171,7 +186,7 @@ public class SearchEngineTests
     }
 
     [Fact]
-    public void Empty_and_cjk_queries_return_nothing()
+    public void Empty_queries_and_unknown_chinese_return_nothing()
     {
         Assert.Empty(Search(Sample(), "   ").Hits);
         Assert.Empty(Search(Sample(), "漏洞").Hits);

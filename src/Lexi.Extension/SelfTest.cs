@@ -17,13 +17,13 @@ using Windows.System;
 namespace Lexi.Extension;
 
 /// <summary>
-/// <c>Lexi.Extension.exe --self-test [report-file] [--ai] [--network]</c>
+/// <c>Lexi.Extension.exe --self-test [report-file] [--ai] [--network] [--translation]</c>
 /// Drives the real provider, list page, details, entry page, fallback and settings form in-process — the calls
 /// Command Palette makes — against the installed dictionary and writes a PASS/FAIL report. Checks a release
 /// (trimmed) build without a host and helps troubleshooting. Uses a temporary settings folder, never touches the
-/// clipboard and plays no sound. --ai also runs one real Claude Code request; --network downloads one recording.
+/// clipboard and plays no sound. --ai runs a Claude request; --network downloads a recording; --translation tests Google.
 /// </summary>
-internal static class SelfTest
+internal static partial class SelfTest
 {
     private const string WarnPrefix = "WARN ";
     private static readonly TimeSpan WaitLimit = TimeSpan.FromSeconds(15);
@@ -33,6 +33,7 @@ internal static class SelfTest
     {
         var withAi = args.Contains("--ai");
         var withNetwork = args.Contains("--network");
+        var withTranslation = args.Contains("--translation");
         var reportPath = Path.GetFullPath(args.FirstOrDefault(a => !a.StartsWith("--", StringComparison.Ordinal))
             ?? Path.Combine(Path.GetTempPath(), "lexi-selftest.txt"));
         var dataDirectory = Path.Combine(Path.GetTempPath(), "lexi-selftest-" + Environment.ProcessId.ToString(CultureInfo.InvariantCulture));
@@ -46,7 +47,7 @@ internal static class SelfTest
 
         try
         {
-            RunChecks(report, dataDirectory, withAi, withNetwork);
+            RunChecks(report, dataDirectory, withAi, withNetwork, withTranslation);
         }
         finally
         {
@@ -68,7 +69,7 @@ internal static class SelfTest
         return report.Failed == 0 ? 0 : 1;
     }
 
-    private static void RunChecks(Report r, string dataDirectory, bool withAi, bool withNetwork)
+    private static void RunChecks(Report r, string dataDirectory, bool withAi, bool withNetwork, bool withTranslation)
     {
         ServiceHub hub = null!;
         LexiCommandsProvider provider = null!;
@@ -117,10 +118,17 @@ internal static class SelfTest
                 return $"{form.TemplateJson.Length:N0} chars of Adaptive Card JSON; settings.json saved";
             });
 
+            RunSentenceTranslationChecks(r, hub, provider, dataDirectory);
+            if (withTranslation)
+            {
+                RunSentenceTranslationNetworkCheck(r, hub, provider);
+            }
+
             r.Step("page: home view", () =>
             {
                 var items = page.GetItems();
                 Expect(items.Length >= 2, "home view is empty");
+                Expect(items.Any(i => i.Command is null && i.Section == "提示"), $"no 提示 heading (a command-less item): {Top(items, 8)}");
                 return Top(items, 4);
             });
 
@@ -135,13 +143,22 @@ internal static class SelfTest
             {
                 r.Step($"search: {c.Query} → {c.Expected}", () =>
                 {
+                    if (HasCjk(c.Query) && hub.Dictionary.Info is { ChineseTerms: 0 })
+                    {
+                        return $"{WarnPrefix}skipped: this database has no Chinese index (rebuild it with scripts\\import-data.ps1)";
+                    }
+
                     var items = driver.Search(c.Query, out var ms);
-                    var words = items.Where(i => !HasTag(i, "AI")).ToList();
+
+                    // Chinese queries list English and German results in separate sections: rank within the language.
+                    var words = items.Where(i => !HasTag(i, "AI") && (!HasCjk(c.Query) || HasTag(i, c.Lang.Tag()))).ToList();
                     var rank = words.FindIndex(i => IsHeadword(i, c.Expected, c.Lang)) + 1;
                     Expect(rank > 0 && rank <= c.WithinTop, $"rank {(rank == 0 ? "-" : rank)} (expected ≤ {c.WithinTop}); top: {Top(items)}");
                     return $"rank {rank} (≤ {c.WithinTop}), {ms:F0} ms";
                 });
             }
+
+            RunChineseChecks(r, hub, provider, driver, fallback);
 
             r.Step("list: one part-of-speech label per subtitle", () =>
             {
@@ -232,7 +249,7 @@ internal static class SelfTest
                 return $"all languages: {all.Length} results; Deutsch: {german.Length}";
             });
 
-            r.Step("AI entries: compare, context, sentence", () =>
+            r.Step("entries: AI compare/context, Claude and online sentence translation", () =>
             {
                 Expect(hub.AiEnabled, "AI is disabled in settings");
                 var compare = driver.Search("affect vs effect", out _);
@@ -240,8 +257,24 @@ internal static class SelfTest
                 var context = driver.Search("Schwachstelle @IT Security", out _);
                 Expect(HasTag(context[0], "AI") && context.Any(i => i.Title == "die Schwachstelle"), $"top: {Top(context)}");
                 var sentence = driver.Search("the weather is really nice today", out _);
-                Expect(HasTag(sentence[0], "AI"), $"top: {Top(sentence)}");
-                return $"{compare[0].Title} | {context[0].Title} | {sentence[0].Title}";
+                Expect(!sentence.Any(i => i.Command is TranslationResultPage), "online translation must be opt-in");
+                Expect(sentence is [{ Command: AiPage }, ..] && HasTag(sentence[0], "AI"), $"Claude translation missing: {Top(sentence)}");
+                try
+                {
+                    SubmitSentenceSettings(provider, """{"ai.sentenceTranslation":"true","ai.enabled":"false"}""");
+                    sentence = driver.Search("the weather is really nice today", out _);
+                    Expect(sentence is [{ Command: TranslationResultPage }, ..] && !sentence.Any(i => i.Command is AiPage), $"online only: {Top(sentence)}");
+                    SubmitSentenceSettings(provider, """{"ai.enabled":"true"}""");
+                    sentence = driver.Search("the weather is really nice today", out _);
+                    Expect(sentence is [{ Command: TranslationResultPage }, { Command: AiPage }, ..], $"Google then Claude expected: {Top(sentence)}");
+                    var singleWord = driver.Search("vulnerability", out _);
+                    Expect(!singleWord.Any(i => i.Command is TranslationResultPage or AiPage), "a single word got a sentence translation");
+                    return $"{compare[0].Title} | {context[0].Title} | {sentence[0].Title} + {sentence[1].Title}; single word stays in the dictionary";
+                }
+                finally
+                {
+                    SubmitSentenceSettings(provider, """{"ai.sentenceTranslation":"false","ai.enabled":"true"}""");
+                }
             });
 
             r.Step("no result: empty state", () =>

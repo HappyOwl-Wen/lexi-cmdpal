@@ -7,9 +7,9 @@
 | 数据源 | 用途 | 内容许可 | 是否随安装包分发 |
 |---|---|---|---|
 | ECDICT（ecdict.csv 基础版） | 英→中释义、学习者标签（考试大纲/柯林斯/牛津3000）、BNC/COCA 词频、英语词形 | 仓库 LICENSE 为 MIT，但 README 说明内容汇编自多个第三方来源，**逐条授权未说明** | **否**。只在用户本机构建时导入 |
-| Wiktionary 英文版（Kaikki/wiktextract） | 英语：英/美 IPA、英文释义、词形、录音文件名；德语词条的英文释义 | CC BY-SA 4.0（及 GFDL） | 可以（需署名、相同方式共享），默认仍不打包 |
+| Wiktionary 英文版（Kaikki/wiktextract） | 英语：英/美 IPA、英文释义、词形、录音文件名、按义项的汉语译词（翻译表）；德语词条的英文释义 | CC BY-SA 4.0（及 GFDL） | 可以（需署名、相同方式共享），默认仍不打包 |
 | Wiktionary 德文版（Kaikki/wiktextract） | 德语：冠词/性、格变化、动词主要形式、助动词、可分前缀、比较级、IPA、德语释义、按义项对齐的中/英翻译、词形→原形 | CC BY-SA 4.0 | 同上 |
-| Wiktionary 中文版（Kaikki/wiktextract） | 德语词条的**直接中文释义** | CC BY-SA 4.0 | 同上 |
+| Wiktionary 中文版（Kaikki/wiktextract） | 德语词条的**直接中文释义**；中文词条翻译表里的英/德译词（用于中文反查） | CC BY-SA 4.0 | 同上 |
 | FrequencyWords（OpenSubtitles 2018） | 仅用于排序的词频，不展示 | 内容 CC BY-SA 4.0，代码 MIT | 同上 |
 | Wikimedia Commons 录音 | 真人发音 | 每个文件单独授权（多为 CC BY-SA / CC0） | 否。首次播放时按需下载并缓存在本机 |
 | FreeDict deu-eng / eng-deu（Ding） | 调研后 **v1 未导入** | GPLv3 + AGPLv3（Ding 为 GPLv2+） | — |
@@ -61,7 +61,21 @@
     - 繁简混用：导入时用 Windows `LCMapStringEx(LCMAP_SIMPLIFIED_CHINESE)` 逐字转换为简体。这是字形转换，不改变释义。
   - **英文版**：英语词条的 IPA 带地区标签（Received-Pronunciation / General-American 等）、义项带领域标签（computing 等）、例句、词形，录音分英/美。德语词条的英文释义比德文版翻译表的单词对应更完整（如 Schwachstelle：weakness, weak point; vulnerability）。
 
-**中文释义的原则**：只展示来源中**直接给出**的中文（ECDICT、zh.wiktionary 释义、de.wiktionary 按义项给出的中文对应词），每块都标明来源。**不做**"德→英→中"的多级拼接。德语词条没有中文时如实显示"暂无可靠的直接中文释义"，并提供 AI 解释入口；AI 结果会明确标注为 AI 生成。
+**中文释义的原则**：只展示来源中**直接给出**的中文（ECDICT、zh.wiktionary 释义、de.wiktionary 和 en.wiktionary 按义项给出的中文对应词、zh.wiktionary 中文词条翻译表的对应关系），每块都标明来源。**不做**"德→英→中"的多级拼接。德语词条没有中文时如实显示"暂无可靠的直接中文释义"，并提供 AI 解释入口；AI 结果会明确标注为 AI 生成。
+
+### 2.1 中文反查用到的翻译表（2026-10-21 加入）
+
+中文 → 英/德的反查索引不引入新的数据源，只从上面这些文件里取中文文本（见 ARCHITECTURE.md §3）。其中有两类是专门为反查加入导入的，都来自已经在用的同一批 Wiktionary 文件，许可不变（CC BY-SA 4.0）：
+
+| 内容 | 文件 | 实测（2026-10-21 完整导入） | 质量 |
+|---|---|---|---|
+| 英语词条按义项的汉语（官话）译词 | `kaikki.org-dictionary-English.jsonl.gz` 的 `senses[].translations`，以及少量挂在词条顶层的 `translations` | 原始数据中 50,502 个英语词条带汉语译词，共 87,862 行（`cmn` 83,483、`zh` 4,227 等，少量是闽南语、东干语，导入时排除）。抽查：firewall → 防火墙、authentication → 认证/鉴权、loophole（第 2 义项）→ 漏洞、threat → 威胁、learn → 学习 | 人工编写，按义项对齐。ECDICT 缺的现代词义在这里通常有（ECDICT 的 firewall 是错字「放火墙」，loophole 只有「枪眼」） |
+| 中文词条翻译表里的英/德译词 | `zh-extract.jsonl.gz` 里 `lang_code = zh` 的词条 | 177,384 个中文词条带翻译表。其中能对上词典里英/德词头的：44,010 条对应关系，涉及 27,324 个词头。抽查：防火牆 → firewall / Brandmauer / Firewall、威脅 → threaten / menace / intimidate / drohen / bedrohen、加密 → encrypt / verschlüsseln | 方向正好是中 → 英/德。德语覆盖明显补强 |
+
+- 汉语译词只收官话。翻译表里的闽南语（如 house → 厝）、东干语（西里尔字母）、粤语等其他变体不收。繁体统一转成简体（`防火牆 /防火墙` → 防火墙）。
+- 中文词条的译词只挂到词典里**已有**的英/德词头上，不新建词头。展示时单独成块，注明「中文词条的译词表收录此词」以及原始记录（如 `kaikki:zhwiktionary:防火牆#noun`）。
+- 德文版 Wiktionary 也有约 494 个中文词条（德文释义），数量太少，未使用。
+- ECDICT 中文释义的整理规则（同样只影响反查索引）：`[网络]` 行降权；`[人名]` `[地名]` 等名字音译行大幅降权；带占位符的条目（`吃...的人`、`给…房子住`）不当作译词；括号里的注释（`chink的名词复数`）去掉。
 
 ## 3. FreeDict（调研，v1 未导入）
 

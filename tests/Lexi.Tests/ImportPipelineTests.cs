@@ -98,6 +98,56 @@ public sealed class ImportPipelineTests : IClassFixture<ImportPipelineTests.Fixt
     }
 
     [Fact]
+    public void English_senses_carry_their_mandarin_translations()
+    {
+        var word = _f.Db.GetWordsByFold("authentication", Lang.En).Single();
+        var block = WordViewBuilder.Build(_f.Db, word).Chinese.Single(b => b.Kind == "translation");
+        Assert.Equal("wikt-en", block.Source.Code);
+        Assert.Equal("1", block.Senses[0].Number);
+        Assert.Contains("认证", block.Senses[0].Gloss!, StringComparison.Ordinal);
+        Assert.DoesNotContain("验证", block.Senses[0].Gloss!, StringComparison.Ordinal); // a Hokkien row
+        Assert.DoesNotContain("驗證", block.Senses[0].Gloss!, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Chinese_headwords_link_to_their_english_and_german_translations()
+    {
+        var haus = _f.Db.GetWordsByFold("haus", Lang.De).Single(w => w.Word == "Haus");
+        var view = WordViewBuilder.Build(_f.Db, haus);
+        var reverse = view.Chinese.Single(b => b.Kind == "reverse");
+        Assert.Equal("wikt-zh", reverse.Source.Code);
+        Assert.Equal("房子", reverse.Senses[0].Gloss);
+        Assert.Equal(["建筑物"], reverse.Senses[0].Labels!);
+        Assert.Contains("中文词条", MarkdownRenderer.Full(view), StringComparison.Ordinal);
+
+        // "dwelling" is not a headword of the fixture: no link, no empty entry.
+        Assert.Empty(_f.Db.GetWordsByFold("dwelling", Lang.En));
+    }
+
+    [Fact]
+    public void Reverse_index_finds_both_languages_and_rewards_agreeing_sources()
+    {
+        Assert.True(_f.Db.Info.ChineseTerms > 0);
+
+        // Haus: de.wiktionary translation table (95) and the zh.wiktionary entry 房子 (90) agree.
+        var haus = _f.Db.GetWordsByChinese("房子", Lang.De, 5).Single();
+        Assert.Equal("Haus", haus.Word.Word);
+        Assert.Equal(95 + ZhIndexBuilder.AgreementBonus, haus.Weight);
+
+        var engine = new SearchEngine(_f.Db);
+        var ct = TestContext.Current.CancellationToken;
+
+        // go: ECDICT, the en.wiktionary table that matched no sense, and zh.wiktionary "去" → "to go".
+        var go = engine.Search(new SearchRequest { Text = "去" }, ct).Hits;
+        Assert.Equal("go", go[0].Word.Word);
+        Assert.Equal(MatchKind.Chinese, go[0].Kind);
+        Assert.Equal(100 + (2 * ZhIndexBuilder.AgreementBonus), _f.Db.GetWordsByChinese("去", Lang.En, 5).Single(m => m.Word.Word == "go").Weight);
+
+        // authentication is found only through its en.wiktionary translation table.
+        Assert.Equal("authentication", engine.Search(new SearchRequest { Text = "认证" }, ct).Hits.Single().Word.Word);
+    }
+
+    [Fact]
     public void Traditional_chinese_is_converted_to_simplified_on_windows()
     {
         Assert.SkipUnless(OperatingSystem.IsWindows(), "LCMapStringEx is Windows-only");
@@ -126,9 +176,9 @@ public sealed class ImportPipelineTests : IClassFixture<ImportPipelineTests.Fixt
             Write(raw, "freq/de_full.txt", "haus 50000\nhäuser 8000\ngehen 40000\nging 30000\ngehst 2000\nschwachstelle 300\nschwachstellen 200\nbedrohung 400\nübertragung 900\n");
 
             WriteGz(raw, "kaikki/kaikki.org-dictionary-English.jsonl.gz",
-                """{"word": "authentication", "pos": "noun", "lang": "English", "lang_code": "en", "sounds": [{"ipa": "/ɔːˌθɛntɪˈkeɪʃn̩/", "tags": ["Received-Pronunciation"]}], "senses": [{"glosses": ["Proof of identity required by a user to log on."], "topics": ["computing", "engineering"]}], "forms": [{"form": "authentications", "tags": ["plural"]}]}""",
+                """{"word": "authentication", "pos": "noun", "lang": "English", "lang_code": "en", "sounds": [{"ipa": "/ɔːˌθɛntɪˈkeɪʃn̩/", "tags": ["Received-Pronunciation"]}], "senses": [{"glosses": ["Proof of identity required by a user to log on."], "topics": ["computing", "engineering"], "translations": [{"lang": "Chinese Mandarin", "code": "cmn", "lang_code": "cmn", "sense": "proof of identity", "roman": "rènzhèng", "word": "認證 /认证"}, {"lang": "Chinese", "code": "zh", "lang_code": "zh", "tags": ["Hokkien"], "sense": "proof of identity", "word": "驗證"}, {"lang": "German", "code": "de", "lang_code": "de", "word": "Authentifizierung"}]}], "forms": [{"form": "authentications", "tags": ["plural"]}]}""",
                 """{"word": "went", "pos": "verb", "lang": "English", "lang_code": "en", "senses": [{"glosses": ["simple past of go"], "tags": ["form-of", "past"], "form_of": [{"word": "go"}]}]}""",
-                """{"word": "go", "pos": "verb", "lang": "English", "lang_code": "en", "senses": [{"glosses": ["To move from one place to another."]}], "forms": [{"form": "goes", "tags": ["present", "singular", "third-person"]}, {"form": "went", "tags": ["past"]}, {"form": "gone", "tags": ["participle", "past"]}]}""");
+                """{"word": "go", "pos": "verb", "lang": "English", "lang_code": "en", "senses": [{"glosses": ["To move from one place to another."]}], "translations": [{"lang": "Chinese Mandarin", "code": "cmn", "lang_code": "cmn", "sense": "to move from one place to another", "roman": "qù", "word": "去"}], "forms": [{"form": "goes", "tags": ["present", "singular", "third-person"]}, {"form": "went", "tags": ["past"]}, {"form": "gone", "tags": ["participle", "past"]}]}""");
 
             WriteGz(raw, "kaikki/kaikki.org-dictionary-German.jsonl.gz",
                 """{"word": "Schwachstelle", "pos": "noun", "lang": "German", "lang_code": "de", "senses": [{"glosses": ["weakness, weak point"], "tags": ["feminine"]}, {"glosses": ["vulnerability"], "tags": ["feminine"]}], "forms": [{"form": "Schwachstellen", "tags": ["plural"]}]}""",
@@ -146,7 +196,9 @@ public sealed class ImportPipelineTests : IClassFixture<ImportPipelineTests.Fixt
 
             WriteGz(raw, "kaikki/zh-extract.jsonl.gz",
                 """{"word": "Schwachstelle", "pos": "noun", "lang": "德语", "lang_code": "de", "senses": [{"glosses": ["〈阴〉 pl.Schwachstellen 缺点，弱点"]}]}""",
-                """{"word": "Bedrohung", "pos": "noun", "lang": "德語", "lang_code": "de", "tags": ["feminine"], "senses": [{"glosses": ["威脅、脅迫"]}]}""");
+                """{"word": "Bedrohung", "pos": "noun", "lang": "德語", "lang_code": "de", "tags": ["feminine"], "senses": [{"glosses": ["威脅、脅迫"]}]}""",
+                """{"word": "房子", "pos": "noun", "lang": "汉语", "lang_code": "zh", "senses": [{"glosses": ["供人居住的建筑物"]}], "translations": [{"lang_code": "de", "lang": "德语", "word": "Haus", "sense": "建筑物"}, {"lang_code": "en", "lang": "英语", "word": "dwelling"}]}""",
+                """{"word": "去", "pos": "verb", "lang": "汉语", "lang_code": "zh", "senses": [{"glosses": ["离开所在的地方"], "translations": [{"lang_code": "en", "lang": "英语", "word": "to go"}]}]}""");
 
             var output = Path.Combine(_dir, "lexi.db");
             LexiImporter.Run(new ImportOptions { RawDirectory = raw, OutputPath = output, Log = _ => { } });
