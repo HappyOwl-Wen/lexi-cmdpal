@@ -15,6 +15,16 @@ namespace Lexi.Extension.Pages;
 /// </summary>
 internal sealed partial class DictionaryPage : DynamicListPage, IDisposable
 {
+    /// <summary>ID of the top-level command: Command Palette stores the user's hotkey and alias for Lexi under it.</summary>
+    internal const string CommandId = "com.lexi.dictionary";
+
+    /// <summary>
+    /// ID of the pre-filled pages the main-page fallback opens. Command Palette 0.100 identifies a fallback by the
+    /// ID of its current command and resolves a hotkey to the first item with that ID, so with the top-level ID the
+    /// fallback (or a stale copy left from an earlier extension process) took over the Lexi hotkey.
+    /// </summary>
+    internal const string LookupId = "com.lexi.lookup";
+
     private const int DebounceMs = 40;
     private const int ResultLimit = 20;
 
@@ -33,7 +43,7 @@ internal sealed partial class DictionaryPage : DynamicListPage, IDisposable
     {
         _hub = hub;
         _resetOnOpen = initialQuery is null;
-        Id = "com.lexi.dictionary";
+        Id = _resetOnOpen ? CommandId : LookupId;
         Name = "打开词典";
         Title = "Lexi 词典";
         Icon = IconHelpers.FromRelativePath("Assets\\LexiIcon.png");

@@ -50,6 +50,7 @@ powershell -ExecutionPolicy Bypass -File scripts\import-data.ps1 [-NoEcdict] [-L
 - **CmdPal 失去焦点会自动收起**：窗口是用 DWM cloak 隐身的（`IsWindowVisible` 仍为 true），隐身后 UIA 读不到任何内容。用户正在操作其他窗口时，后台进程也抢不到前台。做 UI 自动化验证前，要请用户暂时别动电脑。
   - `verify7.ps1` 开头用 `GetLastInputInfo` 等鼠标键盘空闲 8 秒再开始（最多等 2 分钟）。第一次运行时用户还在用 Chrome，窗口一弹出就被收起，12 步全部因为找不到窗口而失败；加了这段等待后一次通过。
 - CmdPal 的搜索框 AutomationId 是 `MainSearchBox`。`x-cmdpal://settings` 打开设置，其他 `x-cmdpal://…` 地址会唤出主窗口。验证脚本在 `artifacts\cmdpal-verify\`（`uia.ps1`、`verify*.ps1`，不提交）。
+  - **验证输入要用真实按键**：`verify`～`verify8` 用 UIA `ValuePattern.SetValue` 写搜索框，不需要键盘焦点，所以热键、焦点类问题一直没测出来。`verify9.ps1`（`verify9-lib.ps1`）用 `keybd_event` 按 Alt+T / Alt+Space、逐字母输入，记录焦点所在控件和前台窗口；只在 CmdPal 是前台窗口时才打字，不会打进别的程序。隐藏状态下窗口是 DWM cloak 的，判断「已显示」要查 `DWMWA_CLOAKED`。
   - **含中文的 .ps1 必须带 UTF-8 BOM**，否则 PowerShell 5.1 会按 GBK 解析，直接报语法错误。
   - **在根页面按 `Alt+←` 会收起窗口**（NavigateBack 发现没有上一页时会触发 Dismiss）。回主页要用 `Alt+Home`。
   - 通过上下文命令快捷键（如 Ctrl+I）打开的页面拿不到键盘焦点，Esc 无效。这是宿主的问题，从 Ctrl+K 菜单或回车打开则正常。
@@ -62,6 +63,12 @@ powershell -ExecutionPolicy Bypass -File scripts\import-data.ps1 [-NoEcdict] [-L
     - 旧 fallback 的 `get_FallbackHandler` 也报同样的错。
   - 是偶发的。界面验证失败时先看这个日志，不要急着改扩展代码：重跑，或者请用户完全退出再启动 CmdPal。
   - 只装一次的普通用户不受影响。
+  - 旧对象会一直留在宿主的顶层列表里，热键也可能解析到它们（见下一条）。`install.ps1` 更新已有安装时，如果 CmdPal 在运行，会提示完全退出再启动（托盘图标 → 退出），Reload 不够。
+- **fallback 打开的页面不能用顶层命令的 Id**（2026-10-22，用户反馈「Alt+T 唤出后无法直接输入单词」）：
+  - 用户在 CmdPal 设置里给 Lexi 绑了 Alt+T，`settings.json` 的 `CommandHotkeys` 存的是 `CommandId = com.lexi.dictionary`。宿主按这个 Id 在顶层列表里取**第一个**匹配项（`TopLevelCommandManager.LookupCommand`）。
+  - 宿主 0.100.2 识别 fallback 用的是它**当前命令**的 Id：扩展确实暴露了 `IFallbackCommandItem2.Id`（`com.lexi.fallback`，自检里 QI 成功），但宿主没用上，`settings.json` 里从来没有这个 Id，只有 `com.lexi.dictionary` 和哈希生成的 Id。
+  - 原来 fallback 打开的 `DictionaryPage` 也叫 `com.lexi.dictionary`，所以主页「回退」组里的 Lexi 结果行也挂着「Alt + T」（`UpdateHotkey` 匹配后不会清除）。重装留下的旧 fallback 把这个 Id 缓存住了；按 Alt+T 时热键解析到旧进程里的死对象，宿主先回主页、显示窗口，导航静默失败，窗口停在主页，输入的字进了主页搜索（宿主日志里主页收到 `sdf`、`sdfas`）。
+  - 现在顶层页面保持 `DictionaryPage.CommandId`（用户的热键和别名存在这个 Id 下，不能改），fallback 打开的页面用 `DictionaryPage.LookupId`（`com.lexi.lookup`）。自检「fallback: pages keep off the Lexi command ID」检查这一点，把页面 Id 改回去时它会失败。
 - **不要用 Windows PowerShell 5.1 的 `Get-Content`/`Set-Content` 改源码**：它默认按 GBK 读写，会把中文变成乱码（曾经损坏过 3 个文件）。改源码用 Edit/Write 工具，或者 Git Bash 的 `sed`（按字节处理，安全）。
 - `Lexi.Extension` 必须指定平台（`-p:Platform=x64`）。项目文件里已经把 AnyCPU 映射到 x64。
 - `CsWinRTWindowsMetadata` 指向 NuGet 里的 winmd。不设置的话，CsWinRT 会去注册表找 Windows SDK，然后报错。
@@ -284,10 +291,22 @@ powershell -ExecutionPolicy Bypass -File scripts\import-data.ps1 [-NoEcdict] [-L
   - 第二次：weakness 那一行没有详情，Ctrl+K 只有主命令（宿主的问题，见「踩过的坑」）。
   - 第三次全部通过。
 
+### 修复：Alt+T 唤出后无法直接输入单词 ✅（2026-10-22 在 CmdPal 界面实测，真实按键）
+
+- 现象（用户）：按自己绑定的 Alt+T 唤出后，不能直接输入单词查询。
+- 复现（`verify9.ps1`，真实按键）：Alt+T 后窗口出现、到了前台、焦点也在搜索框，但显示的是主页（占位文字「搜索应用、文件和命令...」），输入的字进了主页搜索。对照组 Alt+Space 正常；从主页列表回车进入 Lexi 后真实输入也正常（`verify9b.ps1`）。
+- 原因和修复见「踩过的坑」：fallback 页面和顶层命令共用 Id，热键解析到了重装后残留的旧 fallback。现在 fallback 页面用 `com.lexi.lookup`。另外 `install.ps1` 更新时提示重启 CmdPal。
+- 验证：单元测试 220/220；自检 Debug 和裁剪后的 Release 包都是 64/64（新增一步，不加 `-Network`）；页面 Id 临时改回去时新增的这一步失败（63/64）。
+- 界面实测（用户 18:46 用 `install.ps1 -SkipBuild` 装上新包，安装目录的 DLL 与包哈希一致；完全退出并重启 CmdPal 后，宿主日志没有 RPC 错误）：
+  - `verify9.ps1`：Alt+T 后 0.4、1.5、3 秒再输入，三次都直接进入 Lexi 页面（Lexi 的占位文字、空搜索框），焦点在搜索框，house / water / haus 都能输入并出结果；
+  - `verify9b.ps1`：主页搜 lexi，只有顶层「Lexi」一行带「Alt + T」，回退组的 Lexi 结果行不再带；从列表回车进入后真实输入正常；
+  - `verify9c.ps1`：先在主页输入 house，让回退条目持有预填页面，收起后按 Alt+T，打开的是空搜索框的 Lexi 首页，输入 water 正常。
+- `settings.json` 里仍然没有 `com.lexi.fallback` 和 `com.lexi.lookup`（宿主连接时 fallback 空闲，Id 是已有的哈希）。用户的 Alt+T 绑定（`com.lexi.dictionary`）不变。新 Id 不在 `FallbackRanks` 里，得分是最低的 1，Lexi 的回退结果和以前一样排在「回退」组末尾。
+
 ## 待办
 
 1. 用户方便时再验证：设置里 Lexi 详情页的表单和别名（Alias `dict`，Indirect）。
 2. Ctrl+I 打开的页面里 Esc 无效是宿主问题。可以考虑向 PowerToys 报告，扩展这边不需要改。
 3. （可选）签名发布：`package.ps1 -Sign` 会生成自签名证书。在其他电脑上信任证书需要管理员权限，执行前先征得用户同意。
 4. （可选）FreeDict deu-eng 作为用户本机可选的补充来源（GPL/AGPL，不要合并进可分发的数据库）。
-5. 以后的改动在用户要求时再提交，提交信息末尾加 `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`。`master` 在 a2ecf75（中文反查和双向翻译）；`feature/lexi-dictionary` 比它多一个提交（英式优先发音，Phase 8），还没合并到 `master`。仓库没有配置远端，没有推送过。
+5. 以后的改动在用户要求时再提交，提交信息末尾加 `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`。`master` 在 a2ecf75（中文反查和双向翻译）；`feature/lexi-dictionary` 比它多两个提交（英式优先发音 Phase 8、Alt+T 热键修复），还没合并到 `master`。仓库没有配置远端，没有推送过。

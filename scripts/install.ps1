@@ -5,7 +5,8 @@
   1. Publishes the extension as an MSIX (self-contained .NET, trimmed, ReadyToRun).
   2. Unpacks it to %LOCALAPPDATA%\Lexi\app\<version> (a stable location, independent of the source tree).
   3. Registers that folder as a package — this requires Windows "Developer Mode".
-  Command Palette picks the extension up automatically (or run "Reload" in Command Palette).
+  Command Palette picks the extension up automatically (or run "Reload" in Command Palette). After an update,
+  quit and restart Command Palette: a running Command Palette keeps objects of the previous extension process.
   The dictionary database (%LOCALAPPDATA%\Lexi\data\lexi.db) is built separately: scripts\import-data.ps1.
 .PARAMETER Database
   A dictionary database built elsewhere (e.g. artifacts\data\lexi.db from `lexi import --out`) to install as
@@ -93,3 +94,8 @@ if (-not (Test-Path (Join-Path $env:LOCALAPPDATA 'Lexi\data\lexi.db'))) {
     Write-Warning "No dictionary database yet. Build it with: powershell -ExecutionPolicy Bypass -File scripts\import-data.ps1"
 }
 Write-Host "Open Command Palette, type 'Lexi' or 'dict'. If it does not appear, run 'Reload' in Command Palette."
+if ($existing -and (Get-Process -Name 'Microsoft.CmdPal.UI' -ErrorAction SilentlyContinue)) {
+    # 'Reload' does not restart the host: it keeps calling objects of the old extension process, and a hotkey bound
+    # to Lexi can resolve to one of them (Alt+T then showed the main page instead of Lexi).
+    Write-Warning "Command Palette is still running with objects from the previous Lexi process. Quit it completely (tray icon > Exit) and start it again; 'Reload' is not enough."
+}

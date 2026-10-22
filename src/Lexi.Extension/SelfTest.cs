@@ -306,6 +306,23 @@ internal static partial class SelfTest
                 return $"\"{first}\" {t1:F1} ms · \"{second}\" {t2:F1} ms · nonsense {t3:F1} ms";
             });
 
+            r.Step("fallback: pages keep off the Lexi command ID (hotkey)", () =>
+            {
+                // Command Palette 0.100 identifies a fallback by its current command's ID and resolves a hotkey to the
+                // first item with the bound ID: sharing the top-level ID sent Alt+T to the fallback instead of Lexi.
+                var handler = fallback.FallbackHandler;
+                handler.UpdateQuery("dict vulnerability");
+                var english = fallback.Command?.Id;
+                handler.UpdateQuery("Häuser");
+                var german = fallback.Command?.Id;
+                handler.UpdateQuery(string.Empty);
+                Expect(page.Id == DictionaryPage.CommandId, $"top-level command ID changed to \"{page.Id}\": existing hotkeys and aliases would be lost");
+                Expect(english is { Length: > 0 } && english != page.Id && german == english, $"fallback page IDs \"{english}\", \"{german}\" vs top-level \"{page.Id}\"");
+                Expect(string.IsNullOrEmpty(fallback.Command?.Id), $"idle fallback command has ID \"{fallback.Command?.Id}\"");
+                var exposed = QueryWinRtInterface(fallback, typeof(IFallbackCommandItem2).GUID) == 0;
+                return $"top-level {page.Id} · fallback pages {english} · fallback item {((IFallbackCommandItem2)fallback).Id} (IFallbackCommandItem2 over COM: {(exposed ? "yes" : "no")})";
+            });
+
             r.Step("pronunciation: Windows TTS", () =>
             {
                 var voices = SpeechSynthesizer.AllVoices;
@@ -417,6 +434,25 @@ internal static partial class SelfTest
         var sw = Stopwatch.StartNew();
         action();
         return sw.Elapsed.TotalMilliseconds;
+    }
+
+    private static int QueryWinRtInterface(object item, Guid iid)
+    {
+        var abi = WinRT.MarshalInspectable<object>.FromManaged(item);
+        try
+        {
+            var hr = Marshal.QueryInterface(abi, in iid, out var ptr);
+            if (hr == 0)
+            {
+                Marshal.Release(ptr);
+            }
+
+            return hr;
+        }
+        finally
+        {
+            WinRT.MarshalInspectable<object>.DisposeAbi(abi);
+        }
     }
 
     private static bool HasTag(IListItem item, string text) => item.Tags?.Any(t => t.Text == text) == true;
