@@ -76,10 +76,15 @@ internal sealed partial class DictionaryPage : DynamicListPage, IDisposable
         get
         {
             // The host reads SearchText when it (re)creates the view for this page, i.e. when the page is opened
-            // from the main list. The top-level page then starts fresh instead of showing the previous query.
-            if (_resetOnOpen && Environment.TickCount64 - Interlocked.Read(ref _lastActivity) > 1000)
+            // from the main list or by a hotkey. The top-level page then starts fresh instead of showing the
+            // previous query, and makes sure the palette that shows it has the keyboard.
+            if (_resetOnOpen)
             {
-                ResetToHome();
+                PaletteFocus.OnPageOpened();
+                if (Environment.TickCount64 - Interlocked.Read(ref _lastActivity) > 1000)
+                {
+                    ResetToHome();
+                }
             }
 
             return base.SearchText;

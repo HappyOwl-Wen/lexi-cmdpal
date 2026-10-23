@@ -30,6 +30,18 @@ internal sealed partial class SentenceTranslationPage : DynamicListPage, IDispos
         _hub.Settings.Changed += OnSettingsChanged;
     }
 
+    public override string SearchText
+    {
+        // Read when the host opens the page (a hotkey can be bound to it, too); see DictionaryPage.SearchText.
+        get
+        {
+            PaletteFocus.OnPageOpened();
+            return base.SearchText;
+        }
+
+        set => base.SearchText = value;
+    }
+
     public override IListItem[] GetItems()
     {
         lock (_gate)

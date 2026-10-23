@@ -69,6 +69,20 @@ powershell -ExecutionPolicy Bypass -File scripts\import-data.ps1 [-NoEcdict] [-L
   - 宿主 0.100.2 识别 fallback 用的是它**当前命令**的 Id：扩展确实暴露了 `IFallbackCommandItem2.Id`（`com.lexi.fallback`，自检里 QI 成功），但宿主没用上，`settings.json` 里从来没有这个 Id，只有 `com.lexi.dictionary` 和哈希生成的 Id。
   - 原来 fallback 打开的 `DictionaryPage` 也叫 `com.lexi.dictionary`，所以主页「回退」组里的 Lexi 结果行也挂着「Alt + T」（`UpdateHotkey` 匹配后不会清除）。重装留下的旧 fallback 把这个 Id 缓存住了；按 Alt+T 时热键解析到旧进程里的死对象，宿主先回主页、显示窗口，导航静默失败，窗口停在主页，输入的字进了主页搜索（宿主日志里主页收到 `sdf`、`sdfas`）。
   - 现在顶层页面保持 `DictionaryPage.CommandId`（用户的热键和别名存在这个 Id 下，不能改），fallback 打开的页面用 `DictionaryPage.LookupId`（`com.lexi.lookup`）。自检「fallback: pages keep off the Lexi command ID」检查这一点，把页面 Id 改回去时它会失败。
+- **Alt+T 后面板出来了，字却打进了 Chrome**（2026-10-23，用户反馈）：
+  - 宿主的 `MainWindow.ShowHwnd` 只调一次 `SetForegroundWindow`，失败了也不补救。Windows 不允许时，面板照样显示在最上层，但没有被激活：收不到按键，也不会因为失焦而收起，字进了原来的前台程序。宿主日志里什么都不记。
+  - 触发条件（`verify10c.ps1`，两轮都复现）：上一次离开面板时**点回了别的窗口**（失焦自动收起），下一次 Alt+T 就失败；用 Esc 或 Alt+Space 收起时下一次正常。失败状态会一直保持，直到面板被别的方式激活一次：`verify10.ps1 -TypeAfter` 连续 7 次 Alt+T 都失败，`verify10b.ps1` 从外部激活一次之后又正常了。
+  - 从另一个进程直接 `SetForegroundWindow` 也会被拒。先 `SendInput` 一个空鼠标事件（不移动、不按键），让本进程成为最后的输入来源，再调用就能成功（`verify10b.ps1` 用一个没按过键的进程验证；PowerToys Run 对自己的窗口也是这么做的）。
+  - 现在由 `Services\PaletteFocus` 处理：顶层页面被打开时（宿主读 `SearchText`），在 1.5 秒内检查；如果面板显示着、前台却是别的程序，就用上面的办法激活面板；前台是面板或其他 CmdPal 窗口时什么都不做。只在 COM 服务器模式下启用，自检不会碰真实的面板。认面板窗口靠：CmdPal 进程、`WinUIDesktopWin32WindowClass`、可见且没有 DWM cloak、启用（toast 是禁用的）、有可调边框（Dock 没有）、工具窗口（设置窗口不是）；找到不止一个就不动。`SendInput` 的 `INPUT` 必须是 40 字节，否则调用被拒，自检检查这一点。
+  - PowerToys 0.102 的宿主这段代码没变，升级解决不了。
+  - 只有绑定到命令的热键会这样：点回别的窗口之后按 Alt+Space，CmdPal 自己就能拿到焦点（`verify10c.ps1 -SecondAltSpace`，2/2）。
+  - 新版实测：点回别的窗口之后按 Alt+T，面板约 75 ms 出现，11 次里每次都被 Lexi 激活，焦点在 `MainSearchBox`，探针窗口一个字也没收到（`verify10c.ps1`，T 按住 60–600 ms）。补救完成的时刻是松开 Alt 后 1–3 ms，或者在一直按住按键时的约 215–240 ms。
+  - 宿主处理绑定到命令的热键时，显示窗口前会先在 UI 线程上同步调用扩展（QueryInterface 判断命令类型、`ResetToHome`）。扩展进程被暂停 300–400 ms 时，面板就晚这么久才出现（`verify10.ps1 -SlowMs`），但这本身不会让焦点丢失。
+  - 宿主的低级键盘钩子（`CmdPalKeyboardService`）装在 UI 线程上。UI 线程忙着处理热键的那段时间（约到按下后 0.3 秒），所有按键都在钩子里排队，`keybd_event` 也要等到那时才返回。所以脚本记录的按键时间是按键处理完的时间：T 只按 30 ms 时，松开 Alt 被记在约 300 ms。
+  - **用 Alt+T 唤出后马上打字，首字母可能被清掉**，这和焦点补救无关：页面加载完成时，宿主的 `SearchBar.Page_PropertyChanged` 用页面的 `SearchText` 覆盖输入框，并按 `InitialSearchText` 全选，在这之前打的字只在宿主的输入框里，扩展收不到。实测：松开 Alt 后 0–20 ms 内按下的首字母在两种状态下都会丢（`ouse`，11/11），50 ms 以后不丢；用 Alt+Space 重新显示已打开的 Lexi 页面（不重新加载）时，松开 Alt 后 2 ms 打字也不丢（4/4）。写在 README「已知限制」里。验证脚本要在松开 Alt 后至少 100 ms 再打字。
+  - 10-22 那次失败伴随宿主日志 `Error giving foreground rights: 0x80070005`（`PowerToysRootPageService.SetActiveExtension` 调 `CoAllowSetForegroundWindow`）；10-23 复现的失败没有这条日志，不能靠它判断。
+  - UI 自动化（`artifacts\cmdpal-verify\verify10*.ps1`）：用自己的探针窗口代替 Chrome。热键只在探针在前台时按，字母只在探针或 CmdPal 在前台时打。探针窗口必须放在独立的 STA 线程上：在脚本线程里用 `DoEvents` 时，一个落到探针上的 Alt 让它进入系统菜单的模态循环，脚本卡了 4 分钟，直到用户点了别的窗口。
+  - 用 `powershell -File` 传数组参数时 `-TypeAfter 0,100,250` 会被当成一个数（100250），要用 `-Command "& 'script' -TypeAfter @(0,100,250)"`。
 - **不要用 Windows PowerShell 5.1 的 `Get-Content`/`Set-Content` 改源码**：它默认按 GBK 读写，会把中文变成乱码（曾经损坏过 3 个文件）。改源码用 Edit/Write 工具，或者 Git Bash 的 `sed`（按字节处理，安全）。
 - `Lexi.Extension` 必须指定平台（`-p:Platform=x64`）。项目文件里已经把 AnyCPU 映射到 x64。
 - `CsWinRTWindowsMetadata` 指向 NuGet 里的 winmd。不设置的话，CsWinRT 会去注册表找 Windows SDK，然后报错。
@@ -302,6 +316,25 @@ powershell -ExecutionPolicy Bypass -File scripts\import-data.ps1 [-NoEcdict] [-L
   - `verify9b.ps1`：主页搜 lexi，只有顶层「Lexi」一行带「Alt + T」，回退组的 Lexi 结果行不再带；从列表回车进入后真实输入正常；
   - `verify9c.ps1`：先在主页输入 house，让回退条目持有预填页面，收起后按 Alt+T，打开的是空搜索框的 Lexi 首页，输入 water 正常。
 - `settings.json` 里仍然没有 `com.lexi.fallback` 和 `com.lexi.lookup`（宿主连接时 fallback 空闲，Id 是已有的哈希）。用户的 Alt+T 绑定（`com.lexi.dictionary`）不变。新 Id 不在 `FallbackRanks` 里，得分是最低的 1，Lexi 的回退结果和以前一样排在「回退」组末尾。
+
+### 修复：Alt+T 后面板没拿到焦点，字打进 Chrome ✅（2026-10-23 在 CmdPal 界面实测，真实按键）
+
+- 现象（用户）：按 Alt+T 后，输入有时不在 PowerToys 里，而是进了别的窗口（比如 Chrome）。
+- 原因、触发条件和修复见「踩过的坑」。改动：`Services\PaletteFocus.cs`（新增）；`DictionaryPage.SearchText` 和 `SentenceTranslationPage.SearchText` 的 getter 调用 `PaletteFocus.OnPageOpened()`；`Program` 在 COM 服务器模式下启用；`Lexi.Extension.csproj` 打开 `AllowUnsafeBlocks`（LibraryImport）。
+- 复现（当前安装的 10-22 版本，`artifacts\cmdpal-verify\`）：
+  - `verify10.ps1`（before、slow-before）：Alt+T 每次都成功（这两轮里面板每次都是用 Alt+Space 收起的），按下 T 后约 3 ms 面板出来，同时拿到前台；
+  - `verify10.ps1 -TypeAfter`（type-before）：被上一轮中断后进入失败状态，7 次 Alt+T 面板都显示了但前台一直是探针，`house` 全部打进探针；
+  - `verify10b.ps1`（poc）：失败状态下，没按过键的进程直接 `SetForegroundWindow` 失败，`water` 进了探针；先发空鼠标事件再调用成功，焦点在 `MainSearchBox`，`water` 进了 Lexi；
+  - `verify10c.ps1`（dismiss-before）：离开面板后再按 Alt+T，Alt+Space 和 Esc 离开 4/4 正常，点回别的窗口离开 2/2 失败。
+- 验证：单元测试 236/236，自检 Debug 和裁剪后的 Release 包都是 65/65（新增「hotkey: palette focus check」：自检时检查是关闭的，`INPUT` 40 字节，能找到 CmdPal 进程并判断面板状态）。当时工作区里还有另一批未提交的性能优化（带 16 个测试），所以测试数比 220 多。单独提交前，把暂存区导出到 `artifacts\commit-check`（不含那批优化）重新构建：单元测试 220/220，自检 Debug 65/65。
+- 新包：`artifacts\msix\Lexi.Extension_0.1.0.0_x64_Test\Lexi.Extension_0.1.0.0_x64.msix`（15:18，包内 `Lexi.Extension.dll` 的 SHA-256 以 `3DE58743` 开头）。它是用当时的整个工作区构建的，所以也包含那批性能优化（这次没有提交）。
+- 界面实测：用户 15:29 用 `install.ps1 -SkipBuild` 装上新包（安装目录的 DLL 与包哈希一致），并完全退出、重启了 CmdPal（宿主日志没有 RPC 错误）。之后：
+  - `verify10c.ps1`（dismiss-after）：Alt+Space、Esc、点回别的窗口三种离开方式各 2 轮，再按 Alt+T 并在松开 Alt 后 100 ms 打字，6/6 全部进了 Lexi。点回别的窗口的那 2 次，CmdPal 自己没拿到焦点，前台在约 190–215 ms 时切到面板（Lexi 补救）；
+  - hold600-after：T 按住 600 ms，补救在 215 / 237 ms 完成，早于松开 T，不依赖松开按键；
+  - altspace-after：点回别的窗口之后按 Alt+Space，CmdPal 自己拿到焦点；
+  - fast-after、fast-normal、type20/50-after、fast-altspace：首字母问题见「踩过的坑」；
+  - `verify9b.ps1`（list-focusfix）：从主页列表回车进入 Lexi，打 `house` 正常，只有顶层 Lexi 一行带「Alt + T」；
+  - 宿主日志在测试期间没有新的错误或警告。
 
 ## 待办
 

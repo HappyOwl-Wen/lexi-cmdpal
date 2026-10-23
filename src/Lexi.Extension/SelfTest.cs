@@ -323,6 +323,23 @@ internal static partial class SelfTest
                 return $"top-level {page.Id} · fallback pages {english} · fallback item {((IFallbackCommandItem2)fallback).Id} (IFallbackCommandItem2 over COM: {(exposed ? "yes" : "no")})";
             });
 
+            r.Step("hotkey: palette focus check", () =>
+            {
+                // Inside Command Palette an opened top-level page activates a palette left behind another window
+                // (Alt+T typing into Chrome); here the check must stay off so the self-test never touches the user's palette.
+                Expect(!PaletteFocus.Enabled, "the focus check is on outside Command Palette");
+                var inputSize = IntPtr.Size == 8 ? 40 : 28;
+                Expect(PaletteFocus.InputSize == inputSize, $"INPUT is {PaletteFocus.InputSize} bytes; SendInput only accepts {inputSize}");
+                var hostIds = PaletteFocus.HostProcessIds();
+                if (hostIds.Count == 0)
+                {
+                    return $"Command Palette is not running (window lookup not exercised); INPUT {inputSize} bytes";
+                }
+
+                var state = PaletteFocus.Check(hostIds, out var palette);
+                return $"Command Palette pid {string.Join(", ", hostIds)}: palette {state}{(palette != 0 ? $" (0x{palette:X})" : string.Empty)}; INPUT {inputSize} bytes";
+            });
+
             r.Step("pronunciation: Windows TTS", () =>
             {
                 var voices = SpeechSynthesizer.AllVoices;

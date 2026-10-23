@@ -1,3 +1,4 @@
+using Lexi.Extension.Services;
 using Microsoft.CommandPalette.Extensions;
 using Shmuelie.WinRTServer;
 using Shmuelie.WinRTServer.CsWinRT;
@@ -22,6 +23,8 @@ public static class Program
 
         if (args.Length > 0 && args[0] == "-RegisterProcessAsComServer")
         {
+            // Only inside Command Palette: Lexi pages then make sure the palette that shows them has the keyboard.
+            PaletteFocus.Enabled = true;
             ComServer server = new();
             using ManualResetEvent extensionDisposedEvent = new(false);
 

@@ -66,6 +66,19 @@
 - 预填查询词的 `DictionaryPage` 不在构造时搜索，而是等宿主第一次 `GetItems()` 时再同步搜索。原因是每次按键都会创建一个新页面，而大多数页面根本不会被打开；
 - 清空时同时把 `Command` 换回无名的 `NoOpCommand`。工具包的 `CommandItem.Title` 在标题为空时会回退到 `Command.Name`，否则主页会残留一个「打开词典」条目。这个 bug 是自检发现的。
 
+### 热键唤出后的键盘焦点（`PaletteFocus`）
+
+用绑定到命令的热键（例如用户给 Lexi 设的 `Alt+T`）唤出面板时，宿主先在 UI 线程上跨进程查询命令类型、回到主页，然后显示窗口，并只调用一次 `SetForegroundWindow`。如果上一次是用鼠标点回别的窗口离开面板的，Windows 会拒绝这次前台切换。这时面板显示在最上层，但没有被激活：按键仍然进入原来的程序，面板也不会因为失焦而收起。之后每次按热键都会这样，直到面板被别的方式激活一次。`Alt+Space`（根热键）不受影响。
+
+`Services/PaletteFocus.cs` 的处理：
+
+- 顶层页面（顶层的 `DictionaryPage`、`SentenceTranslationPage`）在宿主读取 `SearchText`，也就是页面被打开时，调用 `OnPageOpened()`，在后台检查 1.5 秒；
+- 怎么认面板窗口：属于 CmdPal 进程、类名 `WinUIDesktopWin32WindowClass`、可见且没有被 DWM cloak、处于启用状态（toast 窗口是禁用的）、有可调边框（Dock 没有）、是工具窗口（设置窗口不是）；找到不止一个就不处理；
+- 面板显示着、前台却是别的程序时：先用 `SendInput` 发一个空鼠标事件（不移动、不按键），让 Lexi 进程成为最后的输入来源，再调用 `SetForegroundWindow`，最多试 3 次。直接调用 `SetForegroundWindow` 会被拒绝。面板或其他 CmdPal 窗口在前台时什么都不做；
+- 只在 COM 服务器模式下启用（`Program`），所以自检不会碰真实的面板。
+
+实测（`artifacts/cmdpal-verify/verify10c.ps1`）：面板在按下 T 后约 75 ms 出现。CmdPal 自己拿不到焦点时，Lexi 会在按键松开前后（约 0.2–0.3 秒）把面板激活。之后打的字都进了 Lexi。
+
 ### 已在 PowerToys v0.100.2 源码中核实的宿主行为
 
 | 行为 | 依据（`src/modules/cmdpal/…`） | 对 Lexi 的影响 |
@@ -73,6 +86,10 @@
 | 别名由用户按命令配置；Indirect 别名匹配「别名+空格」，Direct 别名一输入就跳转 | `Microsoft.CmdPal.UI.ViewModels/AliasManager.cs`、`CommandAlias.cs` | Lexi 不能自己注册 `dict` 别名。README 指导用户设置 Indirect 别名；副标题里写上 `dict`，这样主页搜索 dict 也能找到 Lexi |
 | fallback 的 `UpdateQuery` 在专用线程同步执行，慢阈值 200 ms | `Microsoft.CmdPal.UI.ViewModels/FallbackUpdateManager.cs` | 只做低成本查询，见上文 |
 | `InitialSearchText` 在创建页面的 ViewModel 时读一次 `SearchText` | `Microsoft.CmdPal.UI.ViewModels/ListViewModel.cs` | 顶层页面借此在每次打开时回到首页（超过 1 秒没有输入才重置）；fallback 页面借此带上查询词 |
+| 绑定到命令的热键：`SummonOnUiThread` 先在 UI 线程上查命令类型（跨进程 QueryInterface）并 `ResetToHome()`，再显示窗口；`ShowHwnd` 只调用一次 `SetForegroundWindow`，失败了也不补救。根热键是先显示窗口 | `Microsoft.CmdPal.UI/Pages/ShellPage.xaml.cs`、`Microsoft.CmdPal.UI/MainWindow.xaml.cs`（0.102 相同） | 扩展响应慢时面板会晚出现；前台切换被拒时由 `PaletteFocus` 补救，见上文 |
+| 面板失焦就收起（`MainWindow_Activated` → `HideWindow`）；从没被激活过的面板收不到失焦，会一直显示在最上层 | `Microsoft.CmdPal.UI/MainWindow.xaml.cs` | 所以失败时面板挂在最上层，字却进了别的程序 |
+| 宿主始终装着一个低级键盘钩子（`CmdPalKeyboardService`，在 UI 线程上运行），UI 线程忙的时候所有按键都要等它 | `Microsoft.CmdPal.UI/MainWindow.xaml.cs` | 热键唤出后约 0.3 秒内的按键会被推迟处理 |
+| 页面加载完成时，`SearchBar` 用页面的 `SearchText` 覆盖输入框（`Page_PropertyChanged`），并因为 `InitialSearchText` 全选输入框；在这之前打的字只在宿主的输入框里，不会发给扩展 | `Microsoft.CmdPal.UI/Controls/SearchBar.xaml.cs`、`Microsoft.CmdPal.UI.ViewModels/ListViewModel.cs` | 用命令热键唤出后马上打的首字母可能丢失，扩展无法补救（README「已知限制」） |
 | `TextToSuggest` 用 → 键接受 | `Microsoft.CmdPal.UI/Controls/SearchBar.xaml.cs` | 拼写纠错和变音建议可以一键填入搜索框 |
 | Enter 执行主命令，Ctrl+Enter 执行次要命令（`MoreCommands` 第一项），Ctrl+K 打开命令菜单 | `Microsoft.CmdPal.UI.ViewModels/CommandBarViewModel.cs`、`Microsoft.CmdPal.UI/Pages/ShellPage.xaml.cs` | 「复制释义」放在命令列表第一位 |
 | 选中项时才读取 `Details` / `MoreCommands` | `Microsoft.CmdPal.UI.ViewModels/ListItemViewModel.cs` | 详情按需构建 |
@@ -276,7 +293,7 @@ download（RawFiles）→ ECDICT → enwiktionary 英语 → dewiktionary 德语
 | 单元测试 | `tests/Lexi.Tests` | 规范化、编辑距离、反向转写、模糊索引（与暴力算法对比）、搜索引擎（内存存储）、词形描述、词条编解码、导入清洗规则、口音识别（标签/备注/文件名）、发音顺序（英式优先、显式口音、德语）、音标排序与表头、Claude Code 参数与流事件解析、提示词、缺少 CLI 时的错误处理 |
 | 导入集成测试 | `ImportPipelineTests` | 用样例原始文件跑完整导入，再验证查询和渲染 |
 | 真实数据测试 | `RealDictionaryTests` | 34 个验收用例（15 个英语/德语 + 19 个中文反查，中文用例按所属语言的组内名次计）；德语名词（冠词/复数/IPA）、德语动词（主要形式）、英语（英式 IPA/中文）的抽查；典型查询延迟；没有数据库或没有中文索引时跳过并给出原因 |
-| 扩展自检 | `Lexi.Extension.exe --self-test`（`scripts/self-test.ps1`） | 进程内驱动真实的 provider、页面、详情、词条页、fallback、设置表单（渲染并保存）、筛选、AI 入口、TTS、发音顺序与 Ctrl+P 提示（不出声）；可选测试录音下载和英式优先的完整流程（`-Network`）和 Claude Code（`-Ai`）。`-Package` 测试裁剪后的 Release 包 |
+| 扩展自检 | `Lexi.Extension.exe --self-test`（`scripts/self-test.ps1`） | 进程内驱动真实的 provider、页面、详情、词条页、fallback、设置表单（渲染并保存）、筛选、AI 入口、TTS、发音顺序与 Ctrl+P 提示（不出声）、热键焦点检查（自检时关闭、`INPUT` 大小、能找到面板窗口）；可选测试录音下载和英式优先的完整流程（`-Network`）和 Claude Code（`-Ai`）。`-Package` 测试裁剪后的 Release 包 |
 | 性能 | `lexi bench` | 冷启动、预热后各类查询的分位数、详情构建、内存，生成 `docs/BENCHMARKS.md` |
 | 质量 | `lexi quality` | 验收用例的排名与耗时 |
 

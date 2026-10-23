@@ -22,6 +22,8 @@
     <PublishProfile>win-$(Platform).pubxml</PublishProfile>
     <EnableMsixTooling>true</EnableMsixTooling>
     <AnalysisMode>Recommended</AnalysisMode>
+    <!-- LibraryImport (source-generated P/Invoke for the palette focus check, Services\PaletteFocus.cs) -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 
     <!--
       CsWinRT normally locates Windows.winmd through the registry (installed Windows SDK).

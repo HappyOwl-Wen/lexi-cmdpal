@@ -275,6 +275,7 @@ powershell -ExecutionPolicy Bypass -File scripts\uninstall.ps1 -RemoveData # 同
 | 提示「Wikimedia 限流，N 秒后再试」 | Wikimedia 暂时拒绝了下载。扩展按它要求的时间暂停下载，期间改用合成语音；过一会儿再按 `Ctrl+P` 即可，下载过的录音已缓存，不再联网 |
 | 重新导入时数据库被占用 | `import-data.ps1` 会先结束扩展进程；导入完成后重新打开 Lexi 即可 |
 | 输入中文时提示「当前词典数据库还不支持中文反查」 | 词典是旧版构建的，没有中文索引。再运行一次 `scripts\import-data.ps1`（复用已下载的原始数据，约 10 分钟） |
+| 按 Lexi 的热键（例如 `Alt+T`）后面板出来了，字却打进了别的窗口（比如 Chrome） | CmdPal 0.100–0.102 的问题：上一次用鼠标点回别的窗口离开面板后，下一次用绑定到命令的热键唤出时，Windows 不让它拿到焦点。Lexi 的页面打开时会检查这种情况，把面板激活（在松开热键前后完成）。如果仍然出现，先确认装的是新版（`scripts\install.ps1`），并完全退出、重新启动 CmdPal |
 
 ## 已知限制
 
@@ -282,5 +283,6 @@ powershell -ExecutionPolicy Bypass -File scripts\uninstall.ps1 -RemoveData # 同
 - 很多德语词在 Wiktionary 中没有直接中文释义。这时 Lexi 显示英文/德文释义，并注明「暂无可靠的直接中文释义」，**不做**德→英→中的拼接；
 - 扩展包没有签名。在其他电脑上安装需要开发者模式，或者自签名后以管理员身份信任证书（`scripts\package.ps1 -Sign`）；
 - ARM64 没有实机测试；
+- 用 Lexi 的热键（例如 `Alt+T`）唤出后，如果在按下热键后约 0.3 秒内、页面还没加载完时就打字，第一个字母可能被清掉。这是 CmdPal 宿主的时序问题：每次用命令热键都会重新加载页面，加载完成时宿主用页面的查询词覆盖输入框，之前打的字 Lexi 收不到。实测松开 Alt 后 0–20 ms 内按下的首字母会丢，50 ms 以后不会；用 `Alt+Space` 重新显示已打开的 Lexi 页面时也不会丢；
 - 用 `Ctrl+I` / `Ctrl+G` 打开 AI 页面后，按 Esc **不能**返回，要用 `Alt+←` 或左上角的返回按钮。这是 CmdPal 0.100.2 宿主的焦点问题：通过命令快捷键打开的页面拿不到键盘焦点，所有扩展都会遇到。从 `Ctrl+K` 菜单打开 AI 页面则没有这个问题；
 - 同一个包重复注册（例如 `deploy-dev.ps1` 和 `install.ps1` 交替运行）后，CmdPal 设置的扩展列表里可能出现多个 Lexi 条目。可以在主页输入 `reload` 运行「Reload」，或者在 设置 → 扩展 → 已安装 →「更多选项」里重新加载扩展。
