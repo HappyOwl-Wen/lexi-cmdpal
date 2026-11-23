@@ -192,7 +192,7 @@ AI 功能通过本机安装的 **Claude Code CLI** 的无头模式运行（`clau
 
 ## 数据与许可
 
-- **代码**：MIT（见 [LICENSE](LICENSE)）。
+- **代码**：MIT 许可，© 2026 Yu Wen（见 [LICENSE](LICENSE)）。MIT 只适用于源代码，不包括词典数据。
 - **数据**：仓库和安装包里都不包含词典数据，数据库由你在本机从官方地址构建。
   - **Wiktionary**（经 Kaikki/wiktextract 抽取）：CC BY-SA 4.0，可以再分发，但要署名并以相同方式共享。
   - **ECDICT**：上游没有逐条说明授权，所以只用于本机个人数据库，**不随包分发**。

@@ -1,6 +1,6 @@
 MIT License
 
-Copyright (c) 2026 Lexi contributors
+Copyright (c) 2026 Yu Wen
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -19,7 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
-This license covers the Lexi source code only. Dictionary data is not part of
-this repository; it is downloaded and built locally from third-party sources
-under their own licenses (see docs/DATA_SOURCES.md and THIRD-PARTY-NOTICES.md).

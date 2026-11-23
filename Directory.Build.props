@@ -10,6 +10,8 @@
     <SatelliteResourceLanguages>en;zh-Hans</SatelliteResourceLanguages>
     <Product>Lexi</Product>
     <Company>Lexi</Company>
+    <Authors>Yu Wen</Authors>
+    <Copyright>Copyright (c) 2026 Yu Wen</Copyright>
     <Version>0.1.0</Version>
     <!-- CA1707: underscores in test names; CA1848/CA2254: no ILogger in this project -->
     <NoWarn>$(NoWarn);CA1848;CA2254</NoWarn>

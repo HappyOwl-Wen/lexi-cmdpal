@@ -37,6 +37,7 @@ powershell -ExecutionPolicy Bypass -File scripts\import-data.ps1 [-NoEcdict] [-L
 - 不得为了让测试通过而硬编码测试输入。验收用例只能用来检验结果（`AcceptanceCases.cs`），搜索代码里不能有特判。
 - 没跑过的测试不能说通过。占位实现不能当成完成。部署受阻时如实说明。
 - 需要管理员权限、改系统设置（包括开发者模式）、做不可逆操作之前，先征得用户同意。
+- 提交只署名 Yu Wen（用户 2026-11-23 要求 GitHub 上只显示这一个贡献者）：提交信息里不加 `Co-Authored-By` 等署名行，否则 GitHub 会把 Claude 也列为贡献者。
 
 ## 踩过的坑
 
@@ -342,4 +343,4 @@ powershell -ExecutionPolicy Bypass -File scripts\import-data.ps1 [-NoEcdict] [-L
 2. Ctrl+I 打开的页面里 Esc 无效是宿主问题。可以考虑向 PowerToys 报告，扩展这边不需要改。
 3. （可选）签名发布：`package.ps1 -Sign` 会生成自签名证书。在其他电脑上信任证书需要管理员权限，执行前先征得用户同意。
 4. （可选）FreeDict deu-eng 作为用户本机可选的补充来源（GPL/AGPL，不要合并进可分发的数据库）。
-5. 以后的改动在用户要求时再提交，提交信息末尾加 `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`。`master` 在 a2ecf75（中文反查和双向翻译）；`feature/lexi-dictionary` 比它多两个提交（英式优先发音 Phase 8、Alt+T 热键修复），还没合并到 `master`。仓库没有配置远端，没有推送过。
+5. 以后的改动在用户要求时再提交和推送（署名规则见「规矩」）。代码公开在 https://github.com/HappyOwl-Wen/lexi-cmdpal（MIT，© 2026 Yu Wen；远端 `origin`，分支 `main`，原来的 `master` 和 `feature/lexi-dictionary` 已合并成 `main`）。发布前用 `git filter-branch` 去掉了旧提交里的 `Co-Authored-By` 行，提交哈希因此都和以前不同。
