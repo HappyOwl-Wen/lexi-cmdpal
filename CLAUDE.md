@@ -337,10 +337,19 @@ powershell -ExecutionPolicy Bypass -File scripts\import-data.ps1 [-NoEcdict] [-L
   - `verify9b.ps1`（list-focusfix）：从主页列表回车进入 Lexi，打 `house` 正常，只有顶层 Lexi 一行带「Alt + T」；
   - 宿主日志在测试期间没有新的错误或警告。
 
+### 发布到 GitHub ✅（2026-11-23）
+
+- 仓库：https://github.com/HappyOwl-Wen/lexi-cmdpal（公开，MIT，© 2026 Yu Wen），远端 `origin`，分支 `main`。原来的 `master` 和 `feature/lexi-dictionary` 合并成了 `main`；之前没提交的性能优化（`docs/PERFORMANCE.md`）和英式录音补充脚本分两个提交一起发布。
+- 用户要求 GitHub 上只有 Yu Wen 一个贡献者：用 `git filter-branch` 去掉了旧提交里的 `Co-Authored-By` 行（内容、作者、时间不变，哈希都变了）。核对：8 个提交都关联到 HappyOwl-Wen，贡献者列表只有这一个账号。
+- Release v0.1.0（标签在 `05f8da4`）附带未签名的 `Lexi.Extension_0.1.0.0_x64.msix`（16.5 MB，SHA-256 `446e62ba…`）。发布前单元测试 236/236，从包里取出的扩展自检 65/65。
+- `install.ps1 -Package <.msix>` 安装下载的包（没签名，仍需开发者模式）。只在替身环境里测过：`artifacts\install-verify\test-install-package.ps1` 把 LOCALAPPDATA 指到临时目录，注册、卸载、停进程等命令用别名换成空实现（别名优先于函数和 cmdlet，脚本先确认替换生效），6 项通过。还没有真实安装过。
+- 发新版：改 `Directory.Build.props` 和 `Package.appxmanifest` 里的版本号，`package.ps1` 打包，`self-test.ps1 -Package` 自检，再 `gh release create vX.Y.Z <msix> --target <提交>`。从这里推送时 git 默认的 Git Credential Manager 可能弹窗，用 `git -c credential.helper= -c "credential.helper=!gh auth git-credential" push`。
+
 ## 待办
 
 1. 用户方便时再验证：设置里 Lexi 详情页的表单和别名（Alias `dict`，Indirect）。
 2. Ctrl+I 打开的页面里 Esc 无效是宿主问题。可以考虑向 PowerToys 报告，扩展这边不需要改。
 3. （可选）签名发布：`package.ps1 -Sign` 会生成自签名证书。在其他电脑上信任证书需要管理员权限，执行前先征得用户同意。
 4. （可选）FreeDict deu-eng 作为用户本机可选的补充来源（GPL/AGPL，不要合并进可分发的数据库）。
-5. 以后的改动在用户要求时再提交和推送（署名规则见「规矩」）。代码公开在 https://github.com/HappyOwl-Wen/lexi-cmdpal（MIT，© 2026 Yu Wen；远端 `origin`，分支 `main`，原来的 `master` 和 `feature/lexi-dictionary` 已合并成 `main`）。发布前用 `git filter-branch` 去掉了旧提交里的 `Co-Authored-By` 行，提交哈希因此都和以前不同。
+5. 以后的改动在用户要求时再提交和推送。署名规则见「规矩」，仓库和 Release 见「发布到 GitHub」。
+6. 用户方便时在普通终端验证：下载 v0.1.0 的安装包，用 `install.ps1 -Package` 安装，重启 CmdPal 后能正常查词。
