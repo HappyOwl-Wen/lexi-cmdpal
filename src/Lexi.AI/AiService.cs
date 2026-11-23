@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -49,6 +48,12 @@ public sealed class AiService
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            // A previous request may have filled the cache while this one waited.
+            if (!bypassCache && _cache.TryGet(key, out cached))
+            {
+                return cached;
+            }
+
             var wait = _lastStart + MinInterval - DateTimeOffset.Now;
             if (wait > TimeSpan.Zero)
             {
@@ -71,11 +76,14 @@ public sealed class AiService
 [JsonSerializable(typeof(AiCache.Record))]
 internal sealed partial class AiCacheJsonContext : JsonSerializerContext;
 
-/// <summary>Answer cache keyed by SHA-256 of provider, model, template version and prompt.</summary>
+/// <summary>Answer cache keyed by SHA-256, with a bounded memory LRU and a 30-day disk fallback.</summary>
 internal sealed class AiCache(string directory)
 {
+    internal const int MemoryLimit = 128;
     private static readonly TimeSpan Ttl = TimeSpan.FromDays(30);
-    private readonly ConcurrentDictionary<string, AiResult> _memory = new(StringComparer.Ordinal);
+    private readonly Lock _memoryLock = new();
+    private readonly Dictionary<string, LinkedListNode<(string Key, AiResult Result)>> _memory = new(StringComparer.Ordinal);
+    private readonly LinkedList<(string Key, AiResult Result)> _order = new();
 
     public static string Key(string provider, string? model, string prompt)
     {
@@ -85,10 +93,20 @@ internal sealed class AiCache(string directory)
 
     public bool TryGet(string key, out AiResult result)
     {
-        if (_memory.TryGetValue(key, out result!) && DateTimeOffset.Now - result.CreatedAt < Ttl)
+        lock (_memoryLock)
         {
-            result = result with { FromCache = true };
-            return true;
+            if (_memory.TryGetValue(key, out var node))
+            {
+                _order.Remove(node);
+                if (DateTimeOffset.Now - node.Value.Result.CreatedAt < Ttl)
+                {
+                    _order.AddFirst(node);
+                    result = node.Value.Result with { FromCache = true };
+                    return true;
+                }
+
+                _memory.Remove(key);
+            }
         }
 
         try
@@ -100,7 +118,7 @@ internal sealed class AiCache(string directory)
                 if (rec is not null && DateTimeOffset.Now - rec.CreatedAt < Ttl)
                 {
                     result = new AiResult(rec.Text, rec.Model, TimeSpan.Zero, FromCache: true, rec.CreatedAt);
-                    _memory[key] = result;
+                    Remember(key, result);
                     return true;
                 }
             }
@@ -116,7 +134,7 @@ internal sealed class AiCache(string directory)
 
     public void Put(string key, AiResult result)
     {
-        _memory[key] = result;
+        Remember(key, result);
         try
         {
             Directory.CreateDirectory(directory);
@@ -126,6 +144,28 @@ internal sealed class AiCache(string directory)
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             // Caching is best-effort.
+        }
+    }
+
+    private void Remember(string key, AiResult result)
+    {
+        lock (_memoryLock)
+        {
+            if (_memory.TryGetValue(key, out var node))
+            {
+                node.Value = (key, result);
+                _order.Remove(node);
+                _order.AddFirst(node);
+            }
+            else
+            {
+                _memory.Add(key, _order.AddFirst((key, result)));
+                if (_memory.Count > MemoryLimit)
+                {
+                    _memory.Remove(_order.Last!.Value.Key);
+                    _order.RemoveLast();
+                }
+            }
         }
     }
 

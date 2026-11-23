@@ -31,18 +31,28 @@ internal sealed class Utf8LineReader : IDisposable
     /// <summary>Returns the next line (without '\n'). The memory is only valid until the next call.</summary>
     public bool TryReadLine(out ReadOnlyMemory<byte> line)
     {
+        var scanStart = _start;
         while (true)
         {
-            var span = _buffer.AsSpan(_start, _end - _start);
+            // A stream (especially gzip) may return only a small chunk. Scan each byte
+            // once instead of scanning the entire unfinished line after every read.
+            var span = _buffer.AsSpan(scanStart, _end - scanStart);
             var idx = span.IndexOf((byte)'\n');
             if (idx >= 0)
             {
-                var len = idx > 0 && span[idx - 1] == (byte)'\r' ? idx - 1 : idx;
+                var newline = scanStart + idx;
+                var len = newline - _start;
+                if (len > 0 && _buffer[newline - 1] == (byte)'\r')
+                {
+                    len--;
+                }
+
                 line = _buffer.AsMemory(_start, len);
-                _start += idx + 1;
+                _start = newline + 1;
                 return true;
             }
 
+            scanStart = _end;
             if (_eof)
             {
                 if (_end > _start)
@@ -59,6 +69,7 @@ internal sealed class Utf8LineReader : IDisposable
             if (_start > 0)
             {
                 Buffer.BlockCopy(_buffer, _start, _buffer, 0, _end - _start);
+                scanStart -= _start;
                 _end -= _start;
                 _start = 0;
             }

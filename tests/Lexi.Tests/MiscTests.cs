@@ -30,6 +30,24 @@ public class EntryCodecTests
 
         Assert.True(EntryCodec.Encode(big).Length < System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(big.Senses!.Count).Length + 2000);
     }
+
+    [Fact]
+    public void Reused_buffers_preserve_payloads_of_different_sizes()
+    {
+        var blobs = new List<(string Gloss, byte[] Blob)>();
+        foreach (var size in new[] { 5000, 10, 200_000, 120, 1000 })
+        {
+            var gloss = new string('中', size) + size;
+            var entry = new EntryData { Headword = "test", Senses = [new Sense { Gloss = gloss, GlossLang = "zh" }] };
+            blobs.Add((gloss, EntryCodec.Encode(entry)));
+        }
+
+        // Decode out of order after further encodes have reused the temporary buffers.
+        foreach (var (gloss, blob) in blobs.AsEnumerable().Reverse())
+        {
+            Assert.Equal(gloss, Assert.Single(EntryCodec.Decode(blob).Senses!).Gloss);
+        }
+    }
 }
 
 public class FormTests

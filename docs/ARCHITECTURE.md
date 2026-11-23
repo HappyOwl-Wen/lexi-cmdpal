@@ -123,9 +123,9 @@
 
 - 由所有词头（最多 2 个空格）和常见词形（出现次数 ≥ 30）的 Fold 构成，共 95 万个键；
 - 用 Daciuk 增量算法构建**最小确定性无环自动机（DAWG）**，共享前缀和后缀，内存约 11.6 MB；
-- 搜索时在自动机上做带上界的 OSA（Damerau，允许相邻字母换位）动态规划，整行都超过上界时剪枝；
+- 搜索时在自动机上做带上界的 OSA（Damerau，允许相邻字母换位）动态规划，只计算对角线附近最多 `2k + 1` 个单元，并保留换位所需的前两行再剪枝；每层保存紧凑距离带，普通查询使用栈内存，大距离查询使用数组池；
 - 序列化为一个 blob（魔数 `LXFZ`）存在数据库里，首次纠错时加载，约 20 ms；
-- 测试中与暴力 OSA 的结果逐一对比（`FuzzyIndexTests`）。
+- 测试中与独立的全矩阵 OSA 结果逐一对比（`FuzzyIndexTests`、`OsaReference`）。复杂度分析及优化前后实测见 [PERFORMANCE.md](PERFORMANCE.md)。
 
 ### 排序（`SearchEngine.Score`）
 
@@ -252,7 +252,7 @@ download（RawFiles）→ ECDICT → enwiktionary 英语 → dewiktionary 德语
 
 **AI**（`Lexi.AI`）：
 
-- `AiService` 先检查是否可用，再按「提供者 + 模型 + 模板版本 + 提示词」的 SHA-256 查缓存（内存加磁盘，30 天）；
+- `AiService` 先检查是否可用，再按「提供者 + 模型 + 模板版本 + 提示词」的 SHA-256 查缓存（内存为最多 128 条的 LRU，磁盘缓存和 30 天有效期保留）；排队取得信号量后再次查缓存，复用前一个相同请求的答案，明确要求重新生成时仍绕过缓存；
 - 同一时间只发一个请求（信号量），两次请求至少间隔 1.5 秒；
 - `ClaudeCodeProvider` 的工作方式：
   - 启动 `claude -p --output-format stream-json --verbose --include-partial-messages --tools "" --no-session-persistence --strict-mcp-config --system-prompt …`，提示词从 stdin 传入，逐行解析 `text_delta` 实现流式输出；

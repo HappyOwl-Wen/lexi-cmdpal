@@ -1,5 +1,7 @@
 # Lexi search benchmark
 
+2026-10-23 的复杂度优化及同机前后对比见 [PERFORMANCE.md](PERFORMANCE.md)。以下保留原始基准记录。
+
 - Date: 2026-10-20 21:51
 - Machine: AMD Ryzen 9 7940H w/ Radeon 780M Graphics, 16 logical cores, 31 GB RAM
 - OS: Microsoft Windows 10.0.26300 (X64); runtime .NET 10.0.13

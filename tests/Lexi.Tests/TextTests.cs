@@ -78,6 +78,45 @@ public class EditDistanceTests
         var b = new string('a', 200) + "c";
         Assert.Equal(1, EditDistance.Osa(a, b, 2));
     }
+
+    [Fact]
+    public void Banded_osa_matches_full_matrix_exhaustively()
+    {
+        var words = OsaReference.BinaryWords(5).ToArray();
+        foreach (var a in words)
+        {
+            foreach (var b in words)
+            {
+                var distance = OsaReference.Distance(a, b);
+                for (var bound = 0; bound <= 5; bound++)
+                {
+                    Assert.Equal(Math.Min(distance, bound + 1), EditDistance.Osa(a, b, bound));
+                }
+            }
+        }
+    }
+
+    [Fact]
+    public void Banded_osa_handles_band_edges_and_pooled_rows()
+    {
+        var prefix = new string('a', 120);
+        foreach (var (a, b) in new[]
+        {
+            (prefix + "bc", prefix + "cb"),
+            ("bc" + prefix, "cb" + prefix),
+            (prefix + "abca", "xx" + prefix + "acba"),
+            (prefix, new string('b', 120)),
+        })
+        {
+            var distance = OsaReference.Distance(a, b);
+            foreach (var bound in new[] { 0, 1, 2, 3, 60, 130, int.MaxValue })
+            {
+                var expected = distance <= bound ? distance : bound + 1;
+                Assert.Equal(expected, EditDistance.Osa(a, b, bound));
+                Assert.Equal(expected, EditDistance.Osa(b, a, bound));
+            }
+        }
+    }
 }
 
 public class GermanTransliterationTests

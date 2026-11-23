@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Runtime.InteropServices;
 using System.Text;
 
@@ -161,36 +162,45 @@ public sealed class FuzzyIndex
     /// Enumerates keys within <paramref name="maxDistance"/> (OSA) of <paramref name="query"/> (a folded key).
     /// Stops after <paramref name="maxResults"/> matches.
     /// </summary>
+    /// <remarks>Each expanded edge computes at most 2 * maxDistance + 1 cells; only active prefix bands are stored.</remarks>
     public List<FuzzyMatch> Search(string query, int maxDistance, int maxResults = 512, CancellationToken cancellationToken = default)
     {
+        ArgumentOutOfRangeException.ThrowIfNegative(maxDistance);
         var results = new List<FuzzyMatch>();
         var m = query.Length;
-        if (m == 0 || m > MaxKeyLength + maxDistance)
+        if (m == 0 || maxResults <= 0 || (long)m > MaxKeyLength + (long)maxDistance)
         {
             return results;
         }
 
-        var q = new byte[m];
-        for (var i = 0; i < m; i++)
+        cancellationToken.ThrowIfCancellationRequested();
+        var bound = Math.Min(maxDistance, Math.Max(m, MaxKeyLength));
+        var maxDepth = (int)Math.Min(MaxKeyLength, (long)m + bound);
+        // Only |depth - column| <= bound can yield a match. Keep a compact band for each
+        // active prefix; sibling branches reuse the same rows without clearing them.
+        var width = (int)Math.Min((long)m + 1, (2L * bound) + 1);
+        var cells = checked((maxDepth + 1) * width);
+        int[]? rented = null;
+        Span<int> rows = cells <= 1024 ? stackalloc int[cells] : (rented = ArrayPool<int>.Shared.Rent(cells)).AsSpan(0, cells);
+        Span<char> path = stackalloc char[MaxKeyLength];
+        try
         {
-            // Characters outside the alphabet map to 0, which never equals an edge label (cost 1, like any substitution).
-            q[i] = query[i] < 0x10000 ? _codeOf[query[i]] : (byte)0;
-        }
+            for (var j = 0; j <= Math.Min(m, bound); j++)
+            {
+                rows[j] = j;
+            }
 
-        var rows = new int[MaxKeyLength + 2][];
-        for (var d = 0; d < rows.Length; d++)
+            var search = new SearchState(this, query, rows, path, width, maxDepth, bound, maxResults, results, cancellationToken);
+            search.Run(0, 0, 0);
+            return results;
+        }
+        finally
         {
-            rows[d] = new int[m + 1];
+            if (rented is not null)
+            {
+                ArrayPool<int>.Shared.Return(rented);
+            }
         }
-
-        for (var j = 0; j <= m; j++)
-        {
-            rows[0][j] = j;
-        }
-
-        var search = new SearchState(this, q, rows, maxDistance, maxResults, results, cancellationToken);
-        search.Run(0, 0);
-        return results;
     }
 
     public byte[] Serialize()
@@ -290,51 +300,87 @@ public sealed class FuzzyIndex
         return -1;
     }
 
-    private sealed class SearchState(FuzzyIndex index, byte[] q, int[][] rows, int maxDistance, int maxResults, List<FuzzyMatch> results, CancellationToken ct)
+    private ref struct SearchState
     {
-        private readonly byte[] _path = new byte[MaxKeyLength + 1];
+        private readonly FuzzyIndex _index;
+        private readonly ReadOnlySpan<char> _query;
+        private readonly Span<int> _rows;
+        private readonly Span<char> _path;
+        private readonly int _width;
+        private readonly int _maxDepth;
+        private readonly int _maxDistance;
+        private readonly int _maxResults;
+        private readonly List<FuzzyMatch> _results;
+        private readonly CancellationToken _ct;
         private int _visits;
+
+        public SearchState(FuzzyIndex index, ReadOnlySpan<char> query, Span<int> rows, Span<char> path, int width, int maxDepth,
+            int maxDistance, int maxResults, List<FuzzyMatch> results, CancellationToken ct)
+        {
+            _index = index;
+            _query = query;
+            _rows = rows;
+            _path = path;
+            _width = width;
+            _maxDepth = maxDepth;
+            _maxDistance = maxDistance;
+            _maxResults = maxResults;
+            _results = results;
+            _ct = ct;
+        }
 
         /// <param name="state">current automaton state</param>
         /// <param name="depth">length of the current prefix; rows[depth] holds its DP row</param>
-        public void Run(int state, int depth)
+        /// <param name="rowMin">minimum of that row's active band</param>
+        public void Run(int state, int depth, int rowMin)
         {
-            if (depth >= MaxKeyLength || results.Count >= maxResults)
+            if (depth >= _maxDepth || _results.Count >= _maxResults)
             {
                 return;
             }
 
             if ((++_visits & 0x3FFF) == 0)
             {
-                ct.ThrowIfCancellationRequested();
+                _ct.ThrowIfCancellationRequested();
             }
 
-            var m = q.Length;
-            var row = rows[depth];
-            var parentRow = depth > 0 ? rows[depth - 1] : null;
-            var lastLabel = depth > 0 ? _path[depth - 1] : (byte)0;
-            var rowMin = row[0];
-            for (var j = 1; j <= m; j++)
-            {
-                rowMin = Math.Min(rowMin, row[j]);
-            }
+            var m = _query.Length;
+            var nextDepth = depth + 1;
+            var rowStart = Math.Max(0, depth - _maxDistance);
+            var rowEnd = (int)Math.Min(m, (long)depth + _maxDistance);
+            var parentStart = Math.Max(0, depth - 1 - _maxDistance);
+            var first = Math.Max(0, nextDepth - _maxDistance);
+            var last = (int)Math.Min(m, (long)nextDepth + _maxDistance);
+            var row = _rows.Slice(depth * _width, _width);
+            var parentRow = depth > 0 ? _rows.Slice((depth - 1) * _width, _width) : Span<int>.Empty;
+            var newRow = _rows.Slice(nextDepth * _width, _width);
+            var lastLabel = depth > 0 ? _path[depth - 1] : '\0';
+            var unreachable = _maxDistance + 1;
 
-            var newRow = rows[depth + 1];
-            for (int e = index._edgeStart[state], end = index._edgeStart[state + 1]; e < end; e++)
+            for (int e = _index._edgeStart[state], end = _index._edgeStart[state + 1]; e < end; e++)
             {
-                var c = index._edgeLabel[e];
-                newRow[0] = depth + 1;
-                var newMin = newRow[0];
-                for (var j = 1; j <= m; j++)
+                var c = _index._alphabet[_index._edgeLabel[e]];
+                var newMin = unreachable;
+                for (var j = first; j <= last; j++)
                 {
-                    var cost = q[j - 1] == c ? 0 : 1;
-                    var v = Math.Min(Math.Min(row[j] + 1, newRow[j - 1] + 1), row[j - 1] + cost);
-                    if (parentRow is not null && j >= 2 && q[j - 1] == lastLabel && q[j - 2] == c)
+                    int v;
+                    if (j == 0)
                     {
-                        v = Math.Min(v, parentRow[j - 2] + 1);
+                        v = nextDepth;
+                    }
+                    else
+                    {
+                        var deletion = j <= rowEnd ? row[j - rowStart] + 1 : unreachable;
+                        var insertion = j > first ? newRow[j - first - 1] + 1 : unreachable;
+                        var substitution = j > rowStart ? row[j - rowStart - 1] + (_query[j - 1] == c ? 0 : 1) : unreachable;
+                        v = Math.Min(Math.Min(deletion, insertion), substitution);
+                        if (depth > 0 && j >= 2 && _query[j - 1] == lastLabel && _query[j - 2] == c)
+                        {
+                            v = Math.Min(v, parentRow[j - 2 - parentStart] + 1);
+                        }
                     }
 
-                    newRow[j] = v;
+                    newRow[j - first] = v;
                     if (v < newMin)
                     {
                         newMin = v;
@@ -342,11 +388,11 @@ public sealed class FuzzyIndex
                 }
 
                 _path[depth] = c;
-                var target = index._edgeTarget[e];
-                if (newRow[m] <= maxDistance && index.IsFinal(target))
+                var target = _index._edgeTarget[e];
+                if (last == m && newRow[m - first] <= _maxDistance && _index.IsFinal(target))
                 {
-                    results.Add(new FuzzyMatch(Decode(depth + 1), newRow[m]));
-                    if (results.Count >= maxResults)
+                    _results.Add(new FuzzyMatch(new string(_path[..nextDepth]), newRow[m - first]));
+                    if (_results.Count >= _maxResults)
                     {
                         return;
                     }
@@ -354,23 +400,16 @@ public sealed class FuzzyIndex
 
                 // Continue while the new row can still reach maxDistance, or a transposition from the
                 // current row (looked back from two levels deeper) still could.
-                if (newMin <= maxDistance || rowMin + 1 <= maxDistance)
+                if (newMin <= _maxDistance || rowMin < _maxDistance)
                 {
                     // The recursion only reads rows[depth + 1] and writes deeper rows.
-                    Run(target, depth + 1);
+                    Run(target, nextDepth, newMin);
+                    if (_results.Count >= _maxResults)
+                    {
+                        return;
+                    }
                 }
             }
-        }
-
-        private string Decode(int length)
-        {
-            return string.Create(length, (index._alphabet, _path), static (span, s) =>
-            {
-                for (var i = 0; i < span.Length; i++)
-                {
-                    span[i] = s._alphabet[s._path[i]];
-                }
-            });
         }
     }
 
@@ -380,13 +419,14 @@ public sealed class FuzzyIndex
         private readonly Node _root = new();
         private readonly Dictionary<Node, Node> _register = new(NodeComparer.Instance);
         private readonly List<(Node Parent, byte Label, Node Child)> _unchecked = [];
-        private byte[] _previous = [];
+        private readonly byte[] _previous = new byte[MaxKeyLength];
+        private int _previousLength;
         private int _nextId;
 
         public void Add(ReadOnlySpan<byte> word)
         {
             var common = 0;
-            var max = Math.Min(word.Length, _previous.Length);
+            var max = Math.Min(word.Length, _previousLength);
             while (common < max && word[common] == _previous[common])
             {
                 common++;
@@ -403,7 +443,8 @@ public sealed class FuzzyIndex
             }
 
             node.Final = true;
-            _previous = word.ToArray();
+            word.CopyTo(_previous);
+            _previousLength = word.Length;
         }
 
         public (int[] EdgeStart, byte[] EdgeLabel, int[] EdgeTarget, ulong[] Final) Finish()

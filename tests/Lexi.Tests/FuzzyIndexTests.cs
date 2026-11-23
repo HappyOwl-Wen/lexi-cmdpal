@@ -1,5 +1,4 @@
 using Lexi.Core.Search;
-using Lexi.Core.Text;
 
 namespace Lexi.Tests;
 
@@ -64,8 +63,8 @@ public class FuzzyIndexTests
             var q = new string(Enumerable.Range(0, rnd.Next(2, 10)).Select(_ => alphabet[rnd.Next(alphabet.Length)]).ToArray());
             for (var d = 1; d <= 2; d++)
             {
-                var expected = words.Where(w => EditDistance.Osa(q, w, d) <= d).OrderBy(w => w, StringComparer.Ordinal).ToList();
-                var actual = index.Search(q, d, maxResults: 100_000, cancellationToken: TestContext.Current.CancellationToken).Select(m => m.Key).OrderBy(w => w, StringComparer.Ordinal).ToList();
+                var expected = words.Select(w => new FuzzyMatch(w, OsaReference.Distance(q, w))).Where(m => m.Distance <= d).OrderBy(m => m.Key, StringComparer.Ordinal).ToList();
+                var actual = index.Search(q, d, maxResults: 100_000, cancellationToken: TestContext.Current.CancellationToken).OrderBy(m => m.Key, StringComparer.Ordinal).ToList();
                 Assert.Equal(expected, actual);
             }
         }
@@ -89,5 +88,46 @@ public class FuzzyIndexTests
         var index = FuzzyIndex.Build(["haus"]);
         var match = Assert.Single(index.Search("hau%", 1, cancellationToken: TestContext.Current.CancellationToken));
         Assert.Equal("haus", match.Key);
+    }
+
+    [Fact]
+    public void Banded_search_matches_full_matrix_exhaustively()
+    {
+        var words = OsaReference.BinaryWords(5).Where(w => w.Length > 0).ToArray();
+        var index = FuzzyIndex.Build(words);
+        foreach (var query in words.Append("xaba").Append("abx"))
+        {
+            var distances = words.Select(w => new FuzzyMatch(w, OsaReference.Distance(query, w))).OrderBy(m => m.Key, StringComparer.Ordinal).ToArray();
+            foreach (var bound in new[] { 0, 1, 2, 5, int.MaxValue })
+            {
+                var expected = distances.Where(m => m.Distance <= bound).ToArray();
+                var actual = index.Search(query, bound, 1000, TestContext.Current.CancellationToken);
+                Assert.Equal(expected, actual);
+                Assert.Equal(expected.Take(3), index.Search(query, bound, 3, TestContext.Current.CancellationToken));
+            }
+        }
+    }
+
+    [Fact]
+    public void Banded_search_handles_longest_keys_and_queries()
+    {
+        var word = new string('a', FuzzyIndex.MaxKeyLength - 2) + "bc";
+        var index = FuzzyIndex.Build([word, "ab", "ba"]);
+        foreach (var query in new[] { word, word[..^2] + "cb", "xx" + word, word + "xx", word[2..], "ba" })
+        {
+            foreach (var bound in new[] { 0, 1, 2, FuzzyIndex.MaxKeyLength, int.MaxValue })
+            {
+                var expected = new[] { word, "ab", "ba" }.Select(w => new FuzzyMatch(w, OsaReference.Distance(query, w)))
+                    .Where(m => m.Distance <= bound).OrderBy(m => m.Key, StringComparer.Ordinal).ToArray();
+                Assert.Equal(expected, index.Search(query, bound, 1000, TestContext.Current.CancellationToken));
+            }
+        }
+    }
+
+    [Fact]
+    public void Search_honors_cancellation_before_traversal()
+    {
+        var index = FuzzyIndex.Build(Words);
+        Assert.Throws<OperationCanceledException>(() => index.Search("haus", 1, cancellationToken: new CancellationToken(true)));
     }
 }

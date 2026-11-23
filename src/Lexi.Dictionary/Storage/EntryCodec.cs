@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Buffers.Binary;
 using System.IO.Compression;
 using System.Text.Json;
@@ -22,16 +23,25 @@ public static class EntryCodec
     public static byte[] Encode(EntryData entry)
     {
         var json = JsonSerializer.SerializeToUtf8Bytes(entry, EntryJsonContext.Default.EntryData);
-        var compressed = new byte[BrotliEncoder.GetMaxCompressedLength(json.Length)];
-        if (json.Length > 96 &&
-            BrotliEncoder.TryCompress(json, compressed, out var written, quality: 6, window: 22) &&
-            written < json.Length - 16)
+        if (json.Length > 96)
         {
-            var result = new byte[5 + written];
-            result[0] = Brotli;
-            BinaryPrimitives.WriteInt32LittleEndian(result.AsSpan(1), json.Length);
-            compressed.AsSpan(0, written).CopyTo(result.AsSpan(5));
-            return result;
+            var compressed = ArrayPool<byte>.Shared.Rent(BrotliEncoder.GetMaxCompressedLength(json.Length));
+            try
+            {
+                if (BrotliEncoder.TryCompress(json, compressed, out var written, quality: 6, window: 22) &&
+                    written < json.Length - 16)
+                {
+                    var result = new byte[5 + written];
+                    result[0] = Brotli;
+                    BinaryPrimitives.WriteInt32LittleEndian(result.AsSpan(1), json.Length);
+                    compressed.AsSpan(0, written).CopyTo(result.AsSpan(5));
+                    return result;
+                }
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(compressed);
+            }
         }
 
         var raw = new byte[5 + json.Length];
@@ -55,12 +65,19 @@ public static class EntryCodec
             return JsonSerializer.Deserialize(payload, EntryJsonContext.Default.EntryData) ?? new EntryData();
         }
 
-        var buffer = new byte[length];
-        if (!BrotliDecoder.TryDecompress(payload, buffer, out var written) || written != length)
+        var buffer = ArrayPool<byte>.Shared.Rent(length);
+        try
         {
-            throw new InvalidDataException("Corrupt entry blob.");
-        }
+            if (!BrotliDecoder.TryDecompress(payload, buffer.AsSpan(0, length), out var written) || written != length)
+            {
+                throw new InvalidDataException("Corrupt entry blob.");
+            }
 
-        return JsonSerializer.Deserialize(buffer, EntryJsonContext.Default.EntryData) ?? new EntryData();
+            return JsonSerializer.Deserialize(buffer.AsSpan(0, length), EntryJsonContext.Default.EntryData) ?? new EntryData();
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
     }
 }

@@ -10,7 +10,7 @@ Lexi 是 PowerToys Command Palette 的英/德 → 中词典扩展，也能中 �
 
 ```powershell
 & $dotnet build src\Lexi.Extension\Lexi.Extension.csproj -c Debug -p:Platform=x64   # 扩展 + 可注册的布局（bin\x64\Debug\...\win-x64）
-& $dotnet test tests\Lexi.Tests\Lexi.Tests.csproj                                    # 220 个测试，期望 0 失败；旧词典（无中文索引）跳过 19 个中文用例
+& $dotnet test tests\Lexi.Tests\Lexi.Tests.csproj                                    # 236 个测试，期望 0 失败；旧词典（无中文索引）跳过 19 个中文用例
 & $dotnet build src\Lexi.Cli\Lexi.Cli.csproj -c Release
 & $dotnet src\Lexi.Cli\bin\Release\net10.0\lexi.dll quality                          # 34/34（旧词典：15 通过，19 跳过）
 & $dotnet src\Lexi.Cli\bin\Release\net10.0\lexi.dll import --out artifacts\data\lexi.db   # 从这里构建新词典只能写到仓库里（见下方 AppData 重定向）
