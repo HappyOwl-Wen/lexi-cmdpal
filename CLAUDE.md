@@ -20,7 +20,7 @@ Lexi 是 PowerToys Command Palette 的英/德 → 中词典扩展，也能中 �
 & $dotnet src\Lexi.Cli\bin\Release\net10.0\lexi.dll ai <词> [--kind grammar] --prompt  # 只打印提示词，不调用 Claude
 powershell -ExecutionPolicy Bypass -File scripts\self-test.ps1 [-Package|-Installed] [-Network] [-Ai]
 powershell -ExecutionPolicy Bypass -File scripts\package.ps1                          # Release MSIX → artifacts\msix
-powershell -ExecutionPolicy Bypass -File scripts\install.ps1 [-SkipBuild] [-Database artifacts\data\lexi.db]   # 需要开发者模式；-Database 同时装新词典
+powershell -ExecutionPolicy Bypass -File scripts\install.ps1 [-SkipBuild] [-Database artifacts\data\lexi.db] [-Package <.msix>]   # 需要开发者模式；-Database 同时装新词典；-Package 安装下载的 Release 包，不构建
 powershell -ExecutionPolicy Bypass -File scripts\deploy-dev.ps1                       # 注册 Debug 布局，需要开发者模式
 powershell -ExecutionPolicy Bypass -File scripts\import-data.ps1 [-NoEcdict] [-Limit N]
 ```

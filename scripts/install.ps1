@@ -2,7 +2,7 @@
 .SYNOPSIS
   Installs the optimized Release build of Lexi for the current user (no admin rights, no certificate).
 .DESCRIPTION
-  1. Publishes the extension as an MSIX (self-contained .NET, trimmed, ReadyToRun).
+  1. Publishes the extension as an MSIX (self-contained .NET, trimmed, ReadyToRun), unless -Package gives one.
   2. Unpacks it to %LOCALAPPDATA%\Lexi\app\<version> (a stable location, independent of the source tree).
   3. Registers that folder as a package — this requires Windows "Developer Mode".
   Command Palette picks the extension up automatically (or run "Reload" in Command Palette). After an update,
@@ -11,6 +11,9 @@
 .PARAMETER Database
   A dictionary database built elsewhere (e.g. artifacts\data\lexi.db from `lexi import --out`) to install as
   %LOCALAPPDATA%\Lexi\data\lexi.db, replacing the current one. The extension is stopped first (it keeps the file open).
+.PARAMETER Package
+  A Lexi .msix to install instead of building one, e.g. the package attached to a release on
+  https://github.com/HappyOwl-Wen/lexi-cmdpal/releases. It is not signed either, so Developer Mode is still needed.
 .NOTES
   To install on another PC without Developer Mode, sign the package with scripts\package.ps1 -Sign and trust
   the certificate there (that step needs administrator rights).
@@ -18,7 +21,8 @@
 param(
     [ValidateSet('x64', 'ARM64')] [string]$Platform = 'x64',
     [switch]$SkipBuild,
-    [string]$Database
+    [string]$Database,
+    [string]$Package
 )
 
 . "$PSScriptRoot\common.ps1"
@@ -41,7 +45,17 @@ if ($Database) {
     Write-Host "Will install dictionary database $databaseSource"
 }
 
-$msix = & "$PSScriptRoot\package.ps1" -Platform $Platform -SkipBuild:$SkipBuild -PassThru
+if ($Package) {
+    $candidates = @($Package)
+    if (-not [IO.Path]::IsPathRooted($Package)) { $candidates += Join-Path $RepoRoot $Package }
+    $msix = $candidates | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+    if (-not $msix) { throw "Package file not found: $($candidates -join ' or ')" }
+    # Absolute path: .NET APIs below resolve relative paths against the process directory, not the PowerShell location.
+    $msix = (Resolve-Path -LiteralPath $msix).Path
+    Write-Host "Will install package $msix"
+} else {
+    $msix = & "$PSScriptRoot\package.ps1" -Platform $Platform -SkipBuild:$SkipBuild -PassThru
+}
 $zip = [IO.Compression.ZipFile]::OpenRead($msix)
 try {
     $entry = $zip.GetEntry('AppxManifest.xml')
@@ -53,9 +67,12 @@ try {
 }
 $version = $manifest.Package.Identity.Version
 $name = $manifest.Package.Identity.Name
+if ($name -ne 'Lexi.SmartDictionary') { throw "$msix is not a Lexi package (identity: $name)." }
+$arch = $manifest.Package.Identity.ProcessorArchitecture
+if (-not $arch) { $arch = $Platform }
 
 $appRoot = Join-Path $env:LOCALAPPDATA 'Lexi\app'
-$target = Join-Path $appRoot "$version-$Platform"
+$target = Join-Path $appRoot "$version-$arch"
 
 Stop-LexiExtensionProcess
 if ($databaseSource) {

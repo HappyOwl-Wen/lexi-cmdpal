@@ -75,6 +75,12 @@ powershell -ExecutionPolicy Bypass -File scripts\install.ps1
 
 脚本会打出优化过的 Release 包（自包含 .NET、裁剪、ReadyToRun），解压到 `%LOCALAPPDATA%\Lexi\app\<版本>`，再注册给当前用户。整个过程不需要管理员权限。
 
+也可以从 [Releases](https://github.com/HappyOwl-Wen/lexi-cmdpal/releases) 下载打好的安装包（`.msix`，没有签名，同样需要开发者模式），省掉构建扩展这一步：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\install.ps1 -Package <下载的 .msix 路径>
+```
+
 **4. 在 Command Palette 中使用**
 
 按 CmdPal 热键（默认 `Alt+Space`），输入 `dict` 或 `lexi`，回车，再输入单词。如果找不到 Lexi，在 CmdPal 里执行一次 `Reload`。
