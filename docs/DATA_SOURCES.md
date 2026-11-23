@@ -16,6 +16,24 @@
 
 **代码与数据分开授权**：Lexi 源代码采用 MIT。仓库里不提交任何词典数据（见 `.gitignore`）。数据库由 `lexi import` 在用户本机从官方下载地址构建，数据库中的 `sources` 表记录每个来源的名称、许可、网址、版本和署名。
 
+## 英式真人录音补充（独立于语音合成）
+
+`scripts/import-british-recordings.py` 从 Wikimedia Commons 的 Lingua Libre 录音者目录补充 Wiktionary 导出尚未收录的音频引用。录音者为 Vealhurl（现有 Kaikki 数据标注 `Southern-England` / `SSB`）和 Back ache（[本人说明](https://commons.wikimedia.org/wiki/User:Back_ache)：英国英语母语，生活于伦敦南郊）。仅接受英语录音文件名与本地英语词头完全匹配的条目，不剥离数字后缀、不猜测词形、不把其他语言或合成语音标为英式真人录音。
+
+每个新增文件通过 Commons `imageinfo` 检查音频类型、许可和限制；原始 API 响应及 `manifest.json` 保存在指定缓存目录，保留文件页、作者、许可名称及链接。数据库按录音者和许可单独建立来源，写入只有音频的补充词条，保留原有释义及录音。音频沿用首次播放下载、之后本地缓存的机制，不随代码分发。
+
+```powershell
+python -m pip install requests brotli
+# 先预览覆盖变化；缓存目录允许中断后继续
+python scripts/import-british-recordings.py --database "$env:LOCALAPPDATA/Lexi/data/lexi.db" --cache artifacts/british-recordings
+# 关闭 Lexi / Command Palette 后写入；脚本先用 SQLite backup 保存完整备份
+python scripts/import-british-recordings.py --database "$env:LOCALAPPDATA/Lexi/data/lexi.db" --cache artifacts/british-recordings --apply
+```
+
+完成后重新启动 Command Palette，使缓存的来源信息和词条刷新。重建整部词库后需再次运行补充脚本。新录音并不保证覆盖所有词；没有录音的词仍会回退到已安装的英式系统语音。
+
+2026-10-26 本机补充实测：从两个目录的 35,182 个文件中匹配并核验 4,317 条新增录音，新增覆盖 3,688 个词，英式真人录音覆盖由 26,361 增至 30,049 个英语词头。数据库 `quick_check` 正常，已安装版本联网自检 66 项通过；抽样下载并解码 `going`、`gonna`、`really` 的 MP3 成功。其余录音仍按需下载，未逐个验证播放；下载端遇到 HTTP 429 时需按 `Retry-After` 等待。`qualitative` 不在本轮两个来源的目录中，仍无新增真人英式录音。
+
 ## 1. ECDICT
 
 - 地址：https://github.com/skywind3000/ECDICT

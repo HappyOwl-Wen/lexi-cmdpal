@@ -10,6 +10,7 @@ BundleArtifacts/
 *.suo
 .vs/
 TestResults/
+__pycache__/
 
 # Dictionary data: raw downloads and built databases are never committed
 # (they are large and carry their own licenses; see docs/DATA_SOURCES.md)

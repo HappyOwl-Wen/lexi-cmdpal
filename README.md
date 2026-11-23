@@ -20,7 +20,7 @@ Lexi 是 PowerToys **Command Palette**（CmdPal）的原生扩展，用来查英
 | 中文反查 | 输入中文，分「英语 / 德语」两组列出对应词：`房子 → house / das Haus`、`防火墙 → firewall / Firewall`；繁体自动转简体；没有整词对应时（`网络安全漏洞`）列出其中最长的已知词语 |
 | 详情面板 | 选中即显示：音标（英式在前、美式在后；两种口音相同时只显示一条「英/美」）、冠词与复数、动词主要形式、中文/英文/德文释义、来源 |
 | 完整词条 | Enter 打开：全部义项、例句、变格/变位表、词形、近义/易混词、学习者信息、来源与许可 |
-| 发音 | 英语**英式优先**：英式真人录音 → 英式系统语音 → 美式录音 → 美式语音；德语先用德国录音，再用奥地利/瑞士录音和德语语音。录音来自 Wikimedia Commons，首次播放时下载并缓存。提示里写明播放的是哪种口音、真人录音还是合成语音，退而求其次时说明原因（如「没有英式录音」）。`Ctrl+K` 里的「英式发音」「美式发音」只播放该口音 |
+| 发音 | 英语**英式优先**：英式真人录音 → 英式系统语音 → 美式录音 → 美式语音；德语先用德国录音，再用奥地利/瑞士录音和德语语音。录音来自 Wikimedia Commons，首次播放时下载并缓存。可用 `scripts/import-british-recordings.py` 批量补充真人英式录音（见 [数据源说明](docs/DATA_SOURCES.md)）。提示里写明播放的是哪种口音、真人录音还是合成语音，退而求其次时说明原因（如「没有英式录音」）。`Ctrl+K` 里的「英式发音」「美式发音」只播放该口音 |
 | AI（可选） | 解释词义、德语语法、易混词辨析、专业语境、句子翻译、中文译成英语和德语。走本机 Claude Code CLI，可取消、可重新生成，结果缓存 30 天 |
 | 在线翻译（可选） | 单独开关，默认关闭；用 Google 翻译把英语/德语句子译成中文、把中文译成英语和德语，按 Enter 才联网，无需 Claude 或 API Key。与 AI 翻译并列，两种可以都开 |
 | 主页快查 | 在 CmdPal 主页输入 `dict vulnerability`，底部直接显示一行释义 |
@@ -32,7 +32,7 @@ Lexi 是 PowerToys **Command Palette**（CmdPal）的原生扩展，用来查英
 - PowerToys 0.100 或更新，并启用 Command Palette（开发和测试用的是 0.100.2）
 - 构建需要 [.NET 10 SDK](https://dotnet.microsoft.com/)，可以装在用户目录。**不需要** Visual Studio，也不需要 Windows SDK
 - 在本机注册未签名的扩展包，需要 Windows **开发者模式**
-- 可选：[Claude Code](https://claude.com/claude-code) CLI（AI 功能）；英语/德语语音包（语音合成）。没有英式录音的词想听英式发音，需要添加「英语(英国)」语音（设置 → 时间和语言 → 语音 → 添加语音）
+- 可选：[Claude Code](https://claude.com/claude-code) CLI（AI 功能）；英语/德语语音包（语音合成）。没有英式录音的词想听英式发音，需要添加「英语(英国)」语音（设置 → 时间和语言 → 语音 → 添加语音）。也可在管理员 Windows PowerShell 中运行 `powershell -ExecutionPolicy Bypass -File scripts\install-british-voice.ps1`，通过 Windows Update 安装英国英语文本转语音组件；完成后重启 Command Palette。这样没有真人英式录音的词也能使用英式合成语音，无需逐词下载录音。
 
 ## 快速开始
 
